@@ -42,6 +42,45 @@ import JSCPPDefault from 'JSCPP';
  * Robustly resolve the JSCPP execution function and namespace.
  * Handles differences across CommonJS, Vite dev, Rollup production bundles, and Vercel.
  */
+function patchJSCPPIncludes(includes: any) {
+  if (!includes || !includes['cstdio'] || (includes as any).__patched) return;
+  (includes as any).__patched = true;
+  const origCstdio = includes['cstdio'].load;
+  const newCstdio = {
+    load: function(rt: any) {
+      const origRegFunc = rt.regFunc.bind(rt);
+      rt.regFunc = function(f: any, sc: any, name: string, ...rest: any[]) {
+        if (name === 'scanf') {
+          const patchedScanf = function(rtScope: any, _this: any, pchar: any, ...args: any[]) {
+            const proxies = args.map((arg) => {
+              if (arg && arg.v && Array.isArray(arg.v.target) && typeof arg.v.position === 'number') {
+                const targetObj = arg.v.target[arg.v.position];
+                return {
+                  isProxy: true,
+                  proxyPtr: {
+                    t: { type: 'pointer', ptrType: 'normal', targetType: arg.t?.eleType || rtScope.intTypeLiteral },
+                    v: { target: targetObj },
+                    left: false
+                  }
+                };
+              }
+              return { isProxy: false, origArg: arg };
+            });
+
+            const newArgs = proxies.map((p) => (p.isProxy ? p.proxyPtr : p.origArg));
+            return f(rtScope, _this, pchar, ...newArgs);
+          };
+          return origRegFunc(patchedScanf, sc, name, ...rest);
+        }
+        return origRegFunc(f, sc, name, ...rest);
+      };
+      origCstdio(rt);
+    }
+  };
+  includes['cstdio'] = newCstdio;
+  includes['stdio.h'] = newCstdio;
+}
+
 function getJSCPPRuntime() {
   const candidates = [
     JSCPPDefault,
@@ -54,6 +93,9 @@ function getJSCPPRuntime() {
 
   for (const candidate of candidates) {
     if (candidate && typeof candidate.run === 'function') {
+      if (candidate.includes) {
+        patchJSCPPIncludes(candidate.includes);
+      }
       return {
         run: candidate.run.bind(candidate),
         includes: candidate.includes
@@ -64,6 +106,9 @@ function getJSCPPRuntime() {
   // If candidate itself is a callable function
   for (const candidate of candidates) {
     if (typeof candidate === 'function') {
+      if ((candidate as any).includes) {
+        patchJSCPPIncludes((candidate as any).includes);
+      }
       return {
         run: candidate,
         includes: (candidate as any).includes

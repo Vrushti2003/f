@@ -211,12 +211,19 @@ export function loadCompetitionState(): CompetitionState {
     if (editorCode.round1_b && (editorCode.round1_b.includes('RLE') || editorCode.round1_b.includes('strlen') || editorCode.round1_b.includes('str[105]'))) {
       editorCode.round1_b = initial.editorCode.round1_b;
     }
+    // Auto-update Round 2 if still containing legacy test scores code
+    if (editorCode.round2 && (editorCode.round2.includes('scores[100]') || editorCode.round2.includes('min_val') || editorCode.round2.includes('BUG 1:'))) {
+      editorCode.round2 = initial.editorCode.round2;
+    }
     // Auto-update Round 3 if still containing legacy Grid Vault code
     if (editorCode.round3 && (editorCode.round3.includes('grid[MAX]') || editorCode.round3.includes('dp[MAX]') || editorCode.round3.includes('energy cost'))) {
       editorCode.round3 = initial.editorCode.round3;
     }
 
     const standardInput = { ...initial.standardInput, ...(parsed.standardInput || {}) };
+    if (standardInput.round2 && standardInput.round2.includes('70 85 90 60 75')) {
+      standardInput.round2 = initial.standardInput.round2;
+    }
     if (standardInput.round1_a && standardInput.round1_a.includes('A B B B C D E')) {
       standardInput.round1_a = '';
     }

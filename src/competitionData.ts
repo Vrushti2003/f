@@ -98,104 +98,138 @@ int main() {
   round2: {
     id: 'round2',
     roundTitle: 'ROUND 2',
-    activityTitle: 'Debugging Challenge (Find & Fix 10 Bugs)',
+    activityTitle: 'Debugging Challenge',
     durationMinutes: 20,
     maxPoints: 100,
-    description: `The following C program is designed to analyze student test scores:
-1. Read N (number of scores).
-2. Read N integer scores.
-3. Compute the minimum score, maximum score, and integer average.
-4. Count how many scores are strictly above the average.
-5. Print in format:
-Min: <MIN>
-Max: <MAX>
-Avg: <AVG>
-Above: <COUNT>
+    description: `Analyze and debug the given C program.
 
-CRITICAL: The given starter code contains EXACTLY 10 BUGS ranging from missing syntax, invalid pointers, off-by-one errors, uninitialized sums, wrong format specifiers, and bad comparisons.
-Locate and fix all 10 bugs, then run and submit the working code! Score incorporates completion speed.`,
+The program performs array operations:
+1. Prompts for and reads 8 integers into an array.
+2. Calculates and displays the total (sum), average, and maximum of the numbers.
+3. Prompts for an integer to search for and prints its 1-based position, or displays "Number not found".
+4. Reverses the array and displays the reversed numbers.
+
+Examine the code carefully, identify and fix all syntax, compilation, logic, and runtime errors so that the program runs correctly.
+Note: In Round 2, the "Run Code" button is disabled. Review your fixes directly and click "SUBMIT CODE" when ready.`,
     constraints: [
-      '1 <= N <= 100',
-      '0 <= Score <= 100',
-      'All outputs on new lines matching exact template',
-      'Time Limit: 2.5 seconds per test case'
+      'Array size is fixed at 8 integers',
+      'Preserve the original program structure and function declarations',
+      'The code runner is disabled in Round 2 — inspect thoroughly and submit when ready'
     ],
-    sampleInput: `5
-70 85 90 60 75`,
-    sampleOutput: `Min: 60
-Max: 90
-Avg: 76
-Above: 2`,
-    explanation: 'Scores 70,85,90,60,75 have Min=60, Max=90, Sum=380, Avg=380/5=76. Scores strictly above 76 are 85 and 90 (Count: 2).',
-    starterCode: `// ROUND 2: DEBUGGING CHALLENGE
-// THIS CODE CONTAINS 10 BUGS. FIND AND FIX ALL OF THEM!
+    sampleInput: `10 20 30 40 50 60 70 80
+50`,
+    sampleOutput: `Enter 8 numbers:
 
-#include <stdio.h>
+Total = 360
+Average = 45
+Maximum = 80
 
-int main() {
-    int n
-    // BUG 1: Missing semicolon above
+Enter number to search: Found at position 5
+Reversed array: 80 70 60 50 40 30 20 10`,
+    explanation: 'The program reads 8 numbers, prints their total (sum), average, maximum, searches for key 50 at 1-based position 5, and prints the reversed array.',
+    starterCode: `#include <stdio.h>
 
-    if (scanf("%d", n) != 1) { // BUG 2: Missing address-of (&n)
-        return 0;
+FLOAT average(int total, int n)
+{
+    return total / n;
+}
+
+int findMax(int a[], int n)
+{
+    int max = a[0], i;
+
+    for (i = 1; i < n; i++);
+    {
+        if (a[i] > max)
+        {
+            max = a[i];
+                            
     }
 
-    int scores[100];
-    int sum; // BUG 3: Uninitialized sum variable!
+    return max;
+}
 
-    // BUG 4: Off-by-one loop bound (<= n instead of < n)
-    for (int i = 0; i <= n; i++) {
-        int v;
-        scanf("%d", v); // BUG 5: Missing address-of (&v)
-        scores[i] = v;
-        sum += scores[i];
+void reverse(int a[], int n)
+{
+    int i, temp;
+
+    for (i = 0; i < n / 2; i++)
+    {
+        temp == a[i]; 
+        a[i] = a[n - i - 1];
+        a[n - i - 1] = temp;
+    }
+}
+
+int saerch(int a, int n, int key) 
+{
+    int i;
+
+    for (i = 0; i < n; i++)
+    {
+        if (a[i] = key) 
+            return i;
     }
 
-    int min_val = 1000;
-    int max_val = -1;
+    return -1;
+}
 
-    for (int i = 0; i < n; i++) {
-        if (scores[i] < min_val) {
-            min_val = scores[i];
-        }
-        if (scores[i] < max_val) { // BUG 6: Logic error (should be > max_val)
-            max_val = scores[i];
-        }
+int main()
+{
+    int a[8], i, key;
+    int total = 0, max, pos;
+    float avg;
+
+    print("Enter 8 numbers:\\n"); 
+
+    for (i = 0; i < 8; i++)
+    {
+        scanf("%d", %a[i]); 
+        total += a[i]:    
     }
 
-    int avg = sum / (n - 1); // BUG 7: Wrong denominator (should be n, not n - 1)
+    max = findmax(a, 8); 
+    avg = average(total, 8);
 
-    int above_count = 0;
-    for (int i = 0; i < n; i++) {
-        if (scores[i] >= avg) { // BUG 8: Says strictly above in spec (> avg, not >=)
-            above_count++;
-        }
+    printf("\\nTotal = %d\\n", total);
+    printf("Average = %d\\n", avg); 
+    printf("Maximum = %d\\n", max);
+
+    printf("\\nEnter number to search: ");
+    scanf("%d", &key);
+
+    pos = search(a, 8, key);
+
+    if (pos != -1)
+        printf("Found at position %d\\n", pos + 1);
+    else
+        printf("Number not found\\n");
+
+    reverse(a, 8);
+
+    printf("Reversed array: ");
+
+    for (i = 0; i < 8; i++)
+    {
+        printf("%d ", a[j]); 
     }
 
-    // BUG 9 & 10: Wrong format specifiers in print outputs
-    printf("Min: %s\\n", min_val); // BUG 9: %s instead of %d
-    printf("Max: %d\\n", max_val);
-    printf("Avg: %d\\n", avg);
-    printf("Above: %f\\n", above_count); // BUG 10: %f instead of %d
+    printf("\\n");
 
     return 0;
+}
 }
 `,
     testCases: [
       {
-        input: `5\n70 85 90 60 75`,
-        expectedOutput: `Min: 60\nMax: 90\nAvg: 76\nAbove: 2\n`,
-        description: 'Sample 1: Standard dataset'
+        input: `10 20 30 40 50 60 70 80\n50`,
+        expectedOutput: `Enter 8 numbers:\n\nTotal = 360\nAverage = 45\nMaximum = 80\n\nEnter number to search: Found at position 5\nReversed array: 80 70 60 50 40 30 20 10`,
+        description: 'Test 1: Search element found'
       },
       {
-        input: `4\n10 20 30 40`,
-        expectedOutput: `Min: 10\nMax: 40\nAvg: 25\nAbove: 2\n`,
-        description: 'Test 2: Monotonic sequence'
-      },
-      {
-        input: `1\n88`,
-        expectedOutput: `Min: 88\nMax: 88\nAvg: 88\nAbove: 0\n`,
-        description: 'Test 3: Single element'
+        input: `8 7 6 5 4 3 2 1\n99`,
+        expectedOutput: `Enter 8 numbers:\n\nTotal = 36\nAverage = 4\nMaximum = 8\n\nEnter number to search: Number not found\nReversed array: 1 2 3 4 5 6 7 8`,
+        description: 'Test 2: Search element not found'
       }
     ]
   },

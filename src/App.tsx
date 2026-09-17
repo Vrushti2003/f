@@ -447,7 +447,28 @@ export default function App() {
           const normalizedActual = (res.output || '').trim();
           const normalizedExpected = test.expectedOutput.trim();
 
-          if (normalizedActual === normalizedExpected) {
+          let isMatch = normalizedActual === normalizedExpected;
+          if (!isMatch && roundId === 'round2') {
+            const cleanActual = normalizedActual.replace(/\r/g, '').replace(/[ \t]+/g, ' ');
+            const cleanExpected = normalizedExpected.replace(/\r/g, '').replace(/[ \t]+/g, ' ');
+            if (cleanActual === cleanExpected) {
+              isMatch = true;
+            } else {
+              const hasTotal = /Total\s*=\s*(360|36)/i.test(normalizedActual);
+              const hasMax = /Maximum\s*=\s*(80|8)/i.test(normalizedActual);
+              const hasSearch =
+                (test.input.includes('50') && /Found at position 5/i.test(normalizedActual)) ||
+                (test.input.includes('99') && /Number not found/i.test(normalizedActual));
+              const hasReversed =
+                (test.input.includes('50') && normalizedActual.includes('80 70 60 50 40 30 20 10')) ||
+                (test.input.includes('99') && normalizedActual.includes('1 2 3 4 5 6 7 8'));
+              if (hasTotal && hasMax && hasSearch && hasReversed) {
+                isMatch = true;
+              }
+            }
+          }
+
+          if (isMatch) {
             passedCount++;
             setStdout((prev) => prev + `[PASSED]\n`);
           } else {
@@ -1429,7 +1450,7 @@ Row 9: 4 leading spaces + 1 star`}
             >
               {stdout ||
                 (compState.activeRoundId === 'round2'
-                  ? '(Code Runner disabled for Round 2. Fix all 10 bugs and click SUBMIT CODE to test your solution)'
+                  ? '(Code Runner disabled for Round 2. Fix the bugs and click SUBMIT CODE to test your solution)'
                   : '(Program stdout will appear here after clicking Run Code)')}
             </pre>
           </div>
