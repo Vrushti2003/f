@@ -2,6 +2,12 @@ export type TeamId = string; // e.g. "Team 01" to "Team 22"
 
 export type RoundId = 'round1_a' | 'round1_b' | 'round2' | 'round3';
 
+export type RoundStatus = 'LOCKED' | 'ACTIVE' | 'SUBMITTED';
+
+export type SubmissionType = 'MANUAL' | 'AUTO_TIME_UP';
+
+export const ROUND_ORDER: RoundId[] = ['round1_a', 'round1_b', 'round2', 'round3'];
+
 export interface TestCase {
   input: string;
   expectedOutput: string;
@@ -48,18 +54,29 @@ export interface ActivePowerCardEffects {
 
 export interface SubmissionRecord {
   id: string;
-  team: TeamId;
+  teamId: string;
+  teamName: string;
   roundId: RoundId;
-  roundTitle: string;
-  activityTitle: string;
-  startDatetime: string;
-  submissionDatetime: string;
-  durationSeconds: number;
-  attempts: number;
-  score: number;
-  status: 'COMPLETED' | 'TIME_OVER' | 'FAILED';
+  roundName: string;
+  activityId: string;
   code: string;
-  testResultsSummary: string;
+  submittedAt: string; // ISO string
+  submissionType: SubmissionType;
+  score: number;
+  timeLimitSeconds: number;
+  startedAt: string;   // ISO string
+  completedAt: string; // ISO string
+  status: 'SUBMITTED' | 'COMPLETED' | 'TIME_OVER' | 'FAILED';
+
+  // Backwards compatibility properties:
+  team?: TeamId;
+  roundTitle?: string;
+  activityTitle?: string;
+  startDatetime?: string;
+  submissionDatetime?: string;
+  durationSeconds?: number;
+  attempts?: number;
+  testResultsSummary?: string;
 }
 
 export interface RoundTimerState {
@@ -69,6 +86,7 @@ export interface RoundTimerState {
   endDatetime: string | null;   // ISO string (target deadline)
   submitted: boolean;
   submissionDatetime: string | null;
+  submissionType?: SubmissionType | null;
   timeOver: boolean;
   elapsedSeconds: number;
 }
@@ -83,3 +101,4 @@ export interface CompetitionState {
   submissions: SubmissionRecord[];
   powerCardEffects: ActivePowerCardEffects;
 }
+

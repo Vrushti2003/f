@@ -1,7 +1,7 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { SubmissionRecord, TeamId } from '../types';
 import { exportResultsAsCSV, exportResultsAsJSON } from '../storage';
-import { Trophy, Download, FileSpreadsheet, FileJson, Clock, CheckCircle2, XCircle } from 'lucide-react';
+import { Trophy, FileSpreadsheet, FileJson, CheckCircle2, XCircle, Code, ChevronDown, ChevronUp } from 'lucide-react';
 
 interface ResultsModalProps {
   isOpen: boolean;
@@ -18,6 +18,8 @@ export const ResultsModal: React.FC<ResultsModalProps> = ({
   submissions,
   onResetAll
 }) => {
+  const [expandedCodeSubId, setExpandedCodeSubId] = useState<string | null>(null);
+
   if (!isOpen) return null;
 
   const totalScore = submissions.reduce((acc, s) => acc + s.score, 0);
@@ -29,7 +31,7 @@ export const ResultsModal: React.FC<ResultsModalProps> = ({
     >
       <div
         id="results-modal"
-        className="w-full max-w-4xl bg-neutral-900 border border-neutral-800 rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]"
+        className="w-full max-w-5xl bg-neutral-900 border border-neutral-800 rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]"
       >
         <div className="px-6 py-5 border-b border-neutral-800 flex items-center justify-between bg-neutral-950/70">
           <div className="flex items-center gap-3">
@@ -52,7 +54,7 @@ export const ResultsModal: React.FC<ResultsModalProps> = ({
             <button
               id="export-csv-btn"
               onClick={() => exportResultsAsCSV(submissions, team)}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-neutral-800 hover:bg-neutral-700 border border-neutral-700 text-neutral-200 text-xs font-medium transition"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-neutral-800 hover:bg-neutral-700 border border-neutral-700 text-neutral-200 text-xs font-medium transition cursor-pointer"
             >
               <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-400" />
               Export CSV
@@ -60,7 +62,7 @@ export const ResultsModal: React.FC<ResultsModalProps> = ({
             <button
               id="export-json-btn"
               onClick={() => exportResultsAsJSON(submissions, team)}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-neutral-800 hover:bg-neutral-700 border border-neutral-700 text-neutral-200 text-xs font-medium transition"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-neutral-800 hover:bg-neutral-700 border border-neutral-700 text-neutral-200 text-xs font-medium transition cursor-pointer"
             >
               <FileJson className="w-3.5 h-3.5 text-blue-400" />
               Export JSON
@@ -68,7 +70,7 @@ export const ResultsModal: React.FC<ResultsModalProps> = ({
             <button
               id="results-modal-close-btn"
               onClick={onClose}
-              className="text-neutral-400 hover:text-neutral-200 text-xs px-2.5 py-1.5 rounded border border-neutral-800 bg-neutral-800/60 transition ml-2"
+              className="text-neutral-400 hover:text-neutral-200 text-xs px-2.5 py-1.5 rounded border border-neutral-800 bg-neutral-800/60 transition ml-2 cursor-pointer"
             >
               Close
             </button>
@@ -117,48 +119,97 @@ export const ResultsModal: React.FC<ResultsModalProps> = ({
                 <table className="w-full text-left text-xs font-mono">
                   <thead className="bg-neutral-900/80 text-neutral-400 text-[11px] uppercase border-b border-neutral-800">
                     <tr>
+                      <th className="py-2.5 px-3">Team</th>
                       <th className="py-2.5 px-3">Round</th>
                       <th className="py-2.5 px-3">Activity</th>
+                      <th className="py-2.5 px-3">Type</th>
                       <th className="py-2.5 px-3">Status</th>
                       <th className="py-2.5 px-3">Score</th>
                       <th className="py-2.5 px-3">Duration</th>
-                      <th className="py-2.5 px-3">Attempts</th>
                       <th className="py-2.5 px-3">Timestamp</th>
+                      <th className="py-2.5 px-3 text-right">Code</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-neutral-800/60 text-neutral-300">
-                    {submissions.map((s) => (
-                      <tr key={s.id} className="hover:bg-neutral-900/30">
-                        <td className="py-2.5 px-3 font-semibold text-neutral-200">{s.roundTitle}</td>
-                        <td className="py-2.5 px-3 text-neutral-400">{s.activityTitle}</td>
-                        <td className="py-2.5 px-3">
-                          <span
-                            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold ${
-                              s.status === 'COMPLETED'
-                                ? 'bg-emerald-950 text-emerald-400 border border-emerald-800'
-                                : s.status === 'TIME_OVER'
-                                ? 'bg-amber-950 text-amber-400 border border-amber-800'
-                                : 'bg-red-950 text-red-400 border border-red-800'
-                            }`}
-                          >
-                            {s.status === 'COMPLETED' ? (
-                              <CheckCircle2 className="w-3 h-3" />
-                            ) : (
-                              <XCircle className="w-3 h-3" />
-                            )}
-                            {s.status}
-                          </span>
-                        </td>
-                        <td className="py-2.5 px-3 font-bold text-emerald-400">+{s.score}</td>
-                        <td className="py-2.5 px-3 text-neutral-400">
-                          {Math.floor(s.durationSeconds / 60)}m {s.durationSeconds % 60}s
-                        </td>
-                        <td className="py-2.5 px-3 text-neutral-400">{s.attempts}</td>
-                        <td className="py-2.5 px-3 text-[11px] text-neutral-500">
-                          {s.submissionDatetime.slice(11, 19)}
-                        </td>
-                      </tr>
-                    ))}
+                    {submissions.map((s) => {
+                      const isExpanded = expandedCodeSubId === s.id;
+                      const roundName = s.roundName || s.roundTitle || s.roundId;
+                      const activityName = s.activityId || s.activityTitle || '';
+                      const teamName = s.teamName || s.team || team || 'Unassigned';
+                      const timestamp = (s.submittedAt || s.submissionDatetime || '').replace('T', ' ').slice(0, 19);
+                      const isAuto = s.submissionType === 'AUTO_TIME_UP';
+
+                      return (
+                        <React.Fragment key={s.id}>
+                          <tr className="hover:bg-neutral-900/30">
+                            <td className="py-2.5 px-3 text-blue-300 font-semibold">{teamName}</td>
+                            <td className="py-2.5 px-3 font-semibold text-neutral-200">{roundName}</td>
+                            <td className="py-2.5 px-3 text-neutral-400">{activityName}</td>
+                            <td className="py-2.5 px-3">
+                              <span
+                                className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                                  isAuto
+                                    ? 'bg-amber-950/80 text-amber-300 border border-amber-800'
+                                    : 'bg-blue-950/80 text-blue-300 border border-blue-800'
+                                }`}
+                              >
+                                {isAuto ? 'AUTO' : 'MANUAL'}
+                              </span>
+                            </td>
+                            <td className="py-2.5 px-3">
+                              <span
+                                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold ${
+                                  s.status === 'COMPLETED' || (s.status === 'SUBMITTED' && s.score > 0)
+                                    ? 'bg-emerald-950 text-emerald-400 border border-emerald-800'
+                                    : s.status === 'TIME_OVER' || isAuto
+                                    ? 'bg-amber-950 text-amber-400 border border-amber-800'
+                                    : 'bg-neutral-800 text-neutral-300 border border-neutral-700'
+                                }`}
+                              >
+                                {s.score > 0 ? (
+                                  <CheckCircle2 className="w-3 h-3" />
+                                ) : (
+                                  <XCircle className="w-3 h-3" />
+                                )}
+                                {s.status}
+                              </span>
+                            </td>
+                            <td className="py-2.5 px-3 font-bold text-emerald-400">+{s.score}</td>
+                            <td className="py-2.5 px-3 text-neutral-400">
+                              {Math.floor((s.durationSeconds || 0) / 60)}m {(s.durationSeconds || 0) % 60}s
+                            </td>
+                            <td className="py-2.5 px-3 text-[11px] text-neutral-500">
+                              {timestamp}
+                            </td>
+                            <td className="py-2.5 px-3 text-right">
+                              <button
+                                onClick={() => setExpandedCodeSubId(isExpanded ? null : s.id)}
+                                className="inline-flex items-center gap-1 px-2 py-1 rounded text-[11px] bg-neutral-800 hover:bg-neutral-700 border border-neutral-700 text-neutral-300 transition"
+                              >
+                                <Code className="w-3 h-3 text-neutral-400" />
+                                {isExpanded ? 'Hide' : 'View'}
+                                {isExpanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                              </button>
+                            </td>
+                          </tr>
+                          {isExpanded && (
+                            <tr>
+                              <td colSpan={9} className="p-3 bg-neutral-950/90 border-t border-neutral-800">
+                                <div className="space-y-1.5">
+                                  <div className="flex items-center justify-between text-[11px] text-neutral-400">
+                                    <span className="font-semibold text-neutral-300">Submitted C Program Code ({teamName} - {roundName}):</span>
+                                    <span>{s.testResultsSummary || ''}</span>
+                                  </div>
+                                  <pre className="p-3 bg-black/80 rounded border border-neutral-800 text-[11px] text-neutral-300 font-mono overflow-x-auto max-h-64 whitespace-pre">
+                                    {s.code || '(No code was written)'}
+                                  </pre>
+                                </div>
+                              </td>
+                            </tr>
+                          )}
+                        </React.Fragment>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -167,7 +218,7 @@ export const ResultsModal: React.FC<ResultsModalProps> = ({
         </div>
 
         <div className="px-6 py-4 border-t border-neutral-800 bg-neutral-950/50 flex items-center justify-between text-xs text-neutral-500">
-          <span>Results are stored strictly locally in browser memory for competition integrity.</span>
+          <span>Results are stored strictly locally in browser storage for competition integrity.</span>
           {onResetAll && (
             <button
               onClick={() => {
@@ -175,7 +226,7 @@ export const ResultsModal: React.FC<ResultsModalProps> = ({
                   onResetAll();
                 }
               }}
-              className="text-red-400 hover:text-red-300 text-[11px] underline"
+              className="text-red-400 hover:text-red-300 text-[11px] underline cursor-pointer"
             >
               Reset Terminal Data
             </button>
@@ -185,3 +236,4 @@ export const ResultsModal: React.FC<ResultsModalProps> = ({
     </div>
   );
 };
+

@@ -1,10 +1,11 @@
 import {
   TeamId,
   RoundId,
+  RoundStatus,
+  ROUND_ORDER,
   CompetitionState,
   SubmissionRecord,
-  RoundTimerState,
-  ActivePowerCardEffects
+  RoundTimerState
 } from './types';
 import { ROUND_SPECS } from './competitionData';
 
@@ -19,9 +20,35 @@ export function getInitialTimerState(roundId: RoundId): RoundTimerState {
     endDatetime: null,
     submitted: false,
     submissionDatetime: null,
+    submissionType: null,
     timeOver: false,
     elapsedSeconds: 0
   };
+}
+
+export function getRoundStatus(
+  roundId: RoundId,
+  timers: Record<RoundId, RoundTimerState>,
+  submissions: SubmissionRecord[]
+): RoundStatus {
+  if (timers[roundId]?.submitted || submissions.some((s) => s.roundId === roundId)) {
+    return 'SUBMITTED';
+  }
+
+  const idx = ROUND_ORDER.indexOf(roundId);
+  if (idx === 0) {
+    return 'ACTIVE';
+  }
+
+  const prevRoundId = ROUND_ORDER[idx - 1];
+  const isPrevSubmitted =
+    timers[prevRoundId]?.submitted || submissions.some((s) => s.roundId === prevRoundId);
+
+  if (isPrevSubmitted) {
+    return 'ACTIVE';
+  }
+
+  return 'LOCKED';
 }
 
 export function getInitialState(): CompetitionState {
@@ -71,6 +98,87 @@ export function getInitialState(): CompetitionState {
   };
 }
 
+export function processExpiredTimersOnLoad(state: CompetitionState): CompetitionState {
+  const now = Date.now();
+  let modified = false;
+  const newSubmissions = [...state.submissions];
+  const newTimers = { ...state.timers };
+
+  for (const roundId of ROUND_ORDER) {
+    const timer = newTimers[roundId];
+    const isSubmitted = timer.submitted || newSubmissions.some((s) => s.roundId === roundId);
+
+    if (timer.started && !isSubmitted && timer.startDatetime) {
+      const startTime = new Date(timer.startDatetime).getTime();
+      const spec = ROUND_SPECS[roundId];
+      const durationMs = spec.durationMinutes * 60 * 1000;
+      const adjustMs = roundId === 'round3' ? (state.powerCardEffects?.timeAdjustSeconds || 0) * 1000 : 0;
+      const deadlineMs = startTime + durationMs + adjustMs;
+
+      if (now >= deadlineMs) {
+        modified = true;
+        const code = state.editorCode[roundId] || spec.starterCode;
+        const durationSecs = spec.durationMinutes * 60;
+        const endIso = new Date(deadlineMs).toISOString();
+        const teamName = state.selectedTeam || 'Unassigned';
+
+        const autoRecord: SubmissionRecord = {
+          id: `sub_${roundId}_${deadlineMs}`,
+          teamId: teamName,
+          teamName,
+          roundId,
+          roundName: spec.roundTitle,
+          activityId: spec.activityTitle,
+          code,
+          submittedAt: endIso,
+          submissionType: 'AUTO_TIME_UP',
+          score: 0,
+          timeLimitSeconds: durationSecs,
+          startedAt: timer.startDatetime,
+          completedAt: endIso,
+          status: 'SUBMITTED',
+          team: teamName,
+          roundTitle: spec.roundTitle,
+          activityTitle: spec.activityTitle,
+          startDatetime: timer.startDatetime,
+          submissionDatetime: endIso,
+          durationSeconds: durationSecs,
+          attempts: (state.attempts[roundId] || 0) + 1,
+          testResultsSummary: 'Timer expired (00:00 reached) — submission automatically recorded.'
+        };
+
+        newSubmissions.unshift(autoRecord);
+        newTimers[roundId] = {
+          ...timer,
+          submitted: true,
+          timeOver: true,
+          submissionDatetime: endIso,
+          submissionType: 'AUTO_TIME_UP',
+          elapsedSeconds: durationSecs
+        };
+      }
+    }
+  }
+
+  if (modified) {
+    state.submissions = newSubmissions;
+    state.timers = newTimers;
+    saveCompetitionState(state);
+  }
+
+  // Ensure activeRoundId is never a LOCKED round
+  const statusOfCurrent = getRoundStatus(state.activeRoundId, state.timers, state.submissions);
+  if (statusOfCurrent === 'LOCKED') {
+    const validRound = ROUND_ORDER.find(
+      (r) => getRoundStatus(r, state.timers, state.submissions) === 'ACTIVE'
+    ) || 'round1_a';
+    state.activeRoundId = validRound;
+    saveCompetitionState(state);
+  }
+
+  return state;
+}
+
 export function loadCompetitionState(): CompetitionState {
   try {
     let raw = localStorage.getItem(STORAGE_KEY);
@@ -106,7 +214,7 @@ export function loadCompetitionState(): CompetitionState {
       standardInput.round3 = initial.standardInput.round3;
     }
 
-    return {
+    const loadedState: CompetitionState = {
       selectedTeam: parsed.selectedTeam || null,
       activeRoundId: parsed.activeRoundId || 'round1_a',
       timers: { ...initial.timers, ...(parsed.timers || {}) },
@@ -116,6 +224,8 @@ export function loadCompetitionState(): CompetitionState {
       submissions: Array.isArray(parsed.submissions) ? parsed.submissions : [],
       powerCardEffects: { ...initial.powerCardEffects, ...(parsed.powerCardEffects || {}) }
     };
+
+    return processExpiredTimersOnLoad(loadedState);
   } catch (err) {
     console.error('Failed to parse saved competition state from localStorage:', err);
     return getInitialState();
@@ -152,8 +262,10 @@ export function exportResultsAsCSV(submissions: SubmissionRecord[], team: TeamId
     'Team',
     'Round',
     'Activity',
+    'Submission Type',
     'Status',
     'Score',
+    'Time Limit(s)',
     'Duration(s)',
     'Attempts',
     'Start Datetime',
@@ -162,15 +274,17 @@ export function exportResultsAsCSV(submissions: SubmissionRecord[], team: TeamId
   ];
 
   const rows = submissions.map((s) => [
-    `"${s.team || team || ''}"`,
-    `"${s.roundTitle}"`,
-    `"${s.activityTitle}"`,
+    `"${s.teamName || s.team || team || ''}"`,
+    `"${s.roundName || s.roundTitle || ''}"`,
+    `"${s.activityId || s.activityTitle || ''}"`,
+    `"${s.submissionType || 'MANUAL'}"`,
     `"${s.status}"`,
     s.score,
-    s.durationSeconds,
-    s.attempts,
-    `"${s.startDatetime}"`,
-    `"${s.submissionDatetime}"`,
+    s.timeLimitSeconds || 0,
+    s.durationSeconds || 0,
+    s.attempts || 1,
+    `"${s.startedAt || s.startDatetime || ''}"`,
+    `"${s.submittedAt || s.submissionDatetime || ''}"`,
     `"${(s.testResultsSummary || '').replace(/"/g, '""')}"`
   ]);
 
@@ -183,3 +297,4 @@ export function exportResultsAsCSV(submissions: SubmissionRecord[], team: TeamId
   a.click();
   URL.revokeObjectURL(url);
 }
+

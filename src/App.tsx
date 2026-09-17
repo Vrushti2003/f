@@ -1,9 +1,12 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { runCCode, ExecutionResult } from './cCompiler';
 import { ROUND_SPECS, TEAMS_LIST, AVAILABLE_POWER_CARDS } from './competitionData';
 import {
   TeamId,
   RoundId,
+  RoundStatus,
+  SubmissionType,
+  ROUND_ORDER,
   CompetitionState,
   SubmissionRecord,
   PowerCardState
@@ -11,7 +14,8 @@ import {
 import {
   loadCompetitionState,
   saveCompetitionState,
-  getInitialState
+  getInitialState,
+  getRoundStatus
 } from './storage';
 import { TeamModal } from './components/TeamModal';
 import { PowerCardsModal } from './components/PowerCardsModal';
@@ -32,7 +36,9 @@ import {
   ShieldAlert,
   Code2,
   Flame,
-  FileCode
+  FileCode,
+  Lock,
+  ChevronRight
 } from 'lucide-react';
 
 export default function App() {
@@ -56,6 +62,29 @@ export default function App() {
   // Live timer tick trigger
   const [currentTimeMs, setCurrentTimeMs] = useState<number>(Date.now());
 
+  // Guards against double submission and race conditions
+  const isSubmittingRef = useRef<boolean>(false);
+  const submittedRoundsRef = useRef<Set<RoundId>>(new Set());
+  const compStateRef = useRef<CompetitionState>(compState);
+
+  useEffect(() => {
+    compStateRef.current = compState;
+  }, [compState]);
+
+  // Synchronize submitted rounds set
+  useEffect(() => {
+    const set = new Set<RoundId>();
+    for (const s of compState.submissions) {
+      set.add(s.roundId);
+    }
+    for (const r of ROUND_ORDER) {
+      if (compState.timers[r]?.submitted) {
+        set.add(r);
+      }
+    }
+    submittedRoundsRef.current = set;
+  }, [compState.submissions, compState.timers]);
+
   const activeRound = ROUND_SPECS[compState.activeRoundId];
   const timerState = compState.timers[compState.activeRoundId];
   const currentCode = compState.editorCode[compState.activeRoundId];
@@ -74,7 +103,7 @@ export default function App() {
     return () => clearInterval(interval);
   }, []);
 
-  // Compute remaining seconds accurately from deadline + time adjustments
+  // Compute remaining seconds accurately from stored start timestamp + configured duration
   const remainingSeconds = useMemo(() => {
     if (!timerState.started) {
       return activeRound.durationMinutes * 60;
@@ -82,20 +111,130 @@ export default function App() {
     if (timerState.submitted) {
       return 0;
     }
-    if (!timerState.endDatetime) {
-      return 0;
+    if (!timerState.startDatetime) {
+      return activeRound.durationMinutes * 60;
     }
 
-    const targetTime = new Date(timerState.endDatetime).getTime();
+    const startTime = new Date(timerState.startDatetime).getTime();
+    const durationMs = activeRound.durationMinutes * 60 * 1000;
     const adjustMs = compState.activeRoundId === 'round3'
-      ? compState.powerCardEffects.timeAdjustSeconds * 1000
+      ? (compState.powerCardEffects?.timeAdjustSeconds || 0) * 1000
       : 0;
 
-    const diffMs = targetTime + adjustMs - currentTimeMs;
-    return Math.max(0, Math.floor(diffMs / 1000));
-  }, [timerState, activeRound, currentTimeMs, compState.activeRoundId, compState.powerCardEffects.timeAdjustSeconds]);
+    const deadlineMs = startTime + durationMs + adjustMs;
+    const diffMs = deadlineMs - currentTimeMs;
+    return Math.max(0, Math.ceil(diffMs / 1000));
+  }, [timerState, activeRound, currentTimeMs, compState.activeRoundId, compState.powerCardEffects?.timeAdjustSeconds]);
 
-  // Automatic Time-Over trigger
+  // Automatic submission when timer reaches 00:00
+  const handleAutoSubmit = useCallback(async (roundId: RoundId) => {
+    // 1. Guard against duplicate or concurrent submissions
+    if (isSubmittingRef.current || submittedRoundsRef.current.has(roundId)) {
+      return;
+    }
+    isSubmittingRef.current = true;
+    submittedRoundsRef.current.add(roundId);
+
+    const currentState = compStateRef.current;
+    const roundSpec = ROUND_SPECS[roundId];
+    const code = currentState.editorCode[roundId] || roundSpec.starterCode;
+    const teamName = currentState.selectedTeam || 'Unassigned';
+    const now = new Date();
+    const nowIso = now.toISOString();
+    const startIso = currentState.timers[roundId]?.startDatetime || nowIso;
+    const durationSecs = roundSpec.durationMinutes * 60;
+
+    let earnedScore = 0;
+    let testSummary = 'Timer expired (00:00 reached) — submission automatically recorded.';
+
+    try {
+      let passedCount = 0;
+      const totalTests = roundSpec.testCases.length;
+      if (totalTests === 0) {
+        const res = await runCCode(code, roundSpec.sampleInput || '', 2000);
+        if (!res.error) passedCount = 1;
+      } else {
+        for (const tc of roundSpec.testCases) {
+          const res = await runCCode(code, tc.input, 2000);
+          if (!res.error && (res.output || '').trim() === tc.expectedOutput.trim()) {
+            passedCount++;
+          } else {
+            break;
+          }
+        }
+      }
+
+      const isAllPassed = totalTests === 0 ? passedCount === 1 : passedCount === totalTests;
+      if (isAllPassed) {
+        earnedScore = roundId === 'round2' ? 70 : roundSpec.maxPoints;
+        testSummary = `Time expired: All tests passed! +${earnedScore} points awarded.`;
+      } else {
+        earnedScore = 0;
+        testSummary = `Time expired: Passed ${passedCount}/${totalTests || 1} tests.`;
+      }
+    } catch {
+      earnedScore = 0;
+    }
+
+    const autoSubmission: SubmissionRecord = {
+      id: `sub_${roundId}_${Date.now()}`,
+      teamId: teamName,
+      teamName,
+      roundId,
+      roundName: roundSpec.roundTitle,
+      activityId: roundSpec.activityTitle,
+      code,
+      submittedAt: nowIso,
+      submissionType: 'AUTO_TIME_UP',
+      score: earnedScore,
+      timeLimitSeconds: durationSecs,
+      startedAt: startIso,
+      completedAt: nowIso,
+      status: 'SUBMITTED',
+      team: teamName,
+      roundTitle: roundSpec.roundTitle,
+      activityTitle: roundSpec.activityTitle,
+      startDatetime: startIso,
+      submissionDatetime: nowIso,
+      durationSeconds: durationSecs,
+      attempts: (currentState.attempts[roundId] || 0) + 1,
+      testResultsSummary: testSummary
+    };
+
+    setCompState((prev) => {
+      if (prev.submissions.some((s) => s.roundId === roundId)) {
+        return prev;
+      }
+      const nextTimers = {
+        ...prev.timers,
+        [roundId]: {
+          ...prev.timers[roundId],
+          submitted: true,
+          timeOver: true,
+          submissionDatetime: nowIso,
+          submissionType: 'AUTO_TIME_UP' as const,
+          elapsedSeconds: durationSecs
+        }
+      };
+      const updated: CompetitionState = {
+        ...prev,
+        timers: nextTimers,
+        submissions: [autoSubmission, ...prev.submissions]
+      };
+      saveCompetitionState(updated);
+      return updated;
+    });
+
+    setSubmitFeedback({
+      success: false,
+      message: 'Time expired — submission automatically recorded.',
+      details: testSummary
+    });
+
+    isSubmittingRef.current = false;
+  }, []);
+
+  // Trigger auto-submit when remainingSeconds reaches 0
   useEffect(() => {
     if (
       timerState.started &&
@@ -103,40 +242,9 @@ export default function App() {
       !timerState.timeOver &&
       remainingSeconds <= 0
     ) {
-      setCompState((prev) => {
-        const nextTimers = {
-          ...prev.timers,
-          [prev.activeRoundId]: {
-            ...prev.timers[prev.activeRoundId],
-            timeOver: true
-          }
-        };
-
-        // Record a TIME_OVER submission if not already submitted
-        const newSub: SubmissionRecord = {
-          id: `sub_${Date.now()}`,
-          team: prev.selectedTeam || 'Unassigned',
-          roundId: prev.activeRoundId,
-          roundTitle: ROUND_SPECS[prev.activeRoundId].roundTitle,
-          activityTitle: ROUND_SPECS[prev.activeRoundId].activityTitle,
-          startDatetime: prev.timers[prev.activeRoundId].startDatetime || new Date().toISOString(),
-          submissionDatetime: new Date().toISOString(),
-          durationSeconds: ROUND_SPECS[prev.activeRoundId].durationMinutes * 60,
-          attempts: prev.attempts[prev.activeRoundId] || 0,
-          score: 0,
-          status: 'TIME_OVER',
-          code: prev.editorCode[prev.activeRoundId],
-          testResultsSummary: 'Timer reached 0:00 before final submission.'
-        };
-
-        return {
-          ...prev,
-          timers: nextTimers,
-          submissions: [newSub, ...prev.submissions]
-        };
-      });
+      handleAutoSubmit(compState.activeRoundId);
     }
-  }, [remainingSeconds, timerState]);
+  }, [remainingSeconds, timerState.started, timerState.submitted, timerState.timeOver, compState.activeRoundId, handleAutoSubmit]);
 
   // Freeze countdown check
   const isKeyboardFrozen = useMemo(() => {
@@ -150,14 +258,51 @@ export default function App() {
     return Math.max(0, Math.ceil((compState.powerCardEffects.freezeUntil - currentTimeMs) / 1000));
   }, [isKeyboardFrozen, compState.powerCardEffects.freezeUntil, currentTimeMs]);
 
-  // Round Selector
-  const handleSelectRound = (roundId: RoundId) => {
-    setCompState((prev) => ({
-      ...prev,
-      activeRoundId: roundId
-    }));
+  // Strict Sequential Round Selection
+  const handleSelectRound = (targetRoundId: RoundId) => {
+    const status = getRoundStatus(targetRoundId, compState.timers, compState.submissions);
+    if (status === 'LOCKED') {
+      // Future round is strictly locked before current round submission
+      return;
+    }
+    setCompState((prev) => {
+      const updated = {
+        ...prev,
+        activeRoundId: targetRoundId
+      };
+      saveCompetitionState(updated);
+      return updated;
+    });
     setSubmitFeedback(null);
     setDiagnosticError(null);
+  };
+
+  // Next Round Navigation
+  const handleNextRound = () => {
+    const currentStatus = getRoundStatus(compState.activeRoundId, compState.timers, compState.submissions);
+    if (currentStatus !== 'SUBMITTED') {
+      // Must submit current round before moving to next
+      return;
+    }
+
+    const currentIdx = ROUND_ORDER.indexOf(compState.activeRoundId);
+    if (currentIdx < ROUND_ORDER.length - 1) {
+      const nextRoundId = ROUND_ORDER[currentIdx + 1];
+      setCompState((prev) => {
+        const updated = {
+          ...prev,
+          activeRoundId: nextRoundId
+        };
+        saveCompetitionState(updated);
+        return updated;
+      });
+      setSubmitFeedback(null);
+      setDiagnosticError(null);
+      setStdout('');
+    } else {
+      // Final round submitted -> view results
+      setIsResultsOpen(true);
+    }
   };
 
   // Start Timer
@@ -166,26 +311,30 @@ export default function App() {
     const now = new Date();
     const end = new Date(now.getTime() + activeRound.durationMinutes * 60 * 1000);
 
-    setCompState((prev) => ({
-      ...prev,
-      timers: {
-        ...prev.timers,
-        [prev.activeRoundId]: {
-          ...prev.timers[prev.activeRoundId],
-          started: true,
-          startDatetime: now.toISOString(),
-          endDatetime: end.toISOString(),
-          timeOver: false
+    setCompState((prev) => {
+      const updated = {
+        ...prev,
+        timers: {
+          ...prev.timers,
+          [prev.activeRoundId]: {
+            ...prev.timers[prev.activeRoundId],
+            started: true,
+            startDatetime: now.toISOString(),
+            endDatetime: end.toISOString(),
+            timeOver: false
+          }
         }
-      }
-    }));
+      };
+      saveCompetitionState(updated);
+      return updated;
+    });
   };
 
   // Run Code (Does NOT stop timer)
   const handleRunCode = async () => {
     if (compState.activeRoundId === 'round2') return;
     if (isRunning || isSubmitting) return;
-    if (timerState.timeOver) return;
+    if (timerState.timeOver || timerState.submitted) return;
 
     setIsRunning(true);
     setStdout('Compiling and running in browser...\n');
@@ -216,15 +365,23 @@ export default function App() {
     }
   };
 
-  // Submit Code (Runs test suite, stops timer on success, records score)
+  // Manual Code Submission
   const handleSubmitCode = async () => {
-    if (isSubmitting || isRunning) return;
-    if (!timerState.started) {
-      alert('Please click START to begin the round before submitting.');
+    const roundId = compState.activeRoundId;
+    // Guard against concurrent or duplicate submission
+    if (isSubmittingRef.current || submittedRoundsRef.current.has(roundId)) {
       return;
     }
-    if (timerState.timeOver) return;
+    if (!timerState.started) {
+      alert('Please click START TIMER to begin the round before submitting.');
+      return;
+    }
+    if (timerState.submitted || timerState.timeOver) {
+      return;
+    }
 
+    isSubmittingRef.current = true;
+    submittedRoundsRef.current.add(roundId);
     setIsSubmitting(true);
     setSubmitFeedback(null);
     setStdout('Running verification test suite for submission...\n');
@@ -277,78 +434,87 @@ export default function App() {
 
       const isAllPassed = totalTests === 0 ? passedCount === 1 : passedCount === totalTests;
       const now = new Date();
+      const nowIso = now.toISOString();
+      const startIso = timerState.startDatetime || nowIso;
+      const elapsedSecs = Math.max(
+        1,
+        Math.floor((now.getTime() - new Date(startIso).getTime()) / 1000)
+      );
+      const timeLimitSecs = activeRound.durationMinutes * 60;
+      const teamName = compState.selectedTeam || 'Unassigned';
 
+      let earnedScore = 0;
       if (isAllPassed) {
-        // Calculate score with optional speed bonus
-        const elapsedSecs = Math.max(
-          1,
-          Math.floor((now.getTime() - new Date(timerState.startDatetime!).getTime()) / 1000)
-        );
-
-        let earnedScore = activeRound.maxPoints;
-        // Round 2 speed factor: speed rewards earlier finishes
-        if (compState.activeRoundId === 'round2') {
-          const maxSecs = activeRound.durationMinutes * 60;
-          const speedBonus = Math.max(0, Math.floor(((maxSecs - elapsedSecs) / maxSecs) * 30));
+        earnedScore = activeRound.maxPoints;
+        if (roundId === 'round2') {
+          const speedBonus = Math.max(0, Math.floor(((timeLimitSecs - elapsedSecs) / timeLimitSecs) * 30));
           earnedScore = 70 + speedBonus;
         }
-
-        const newSubmission: SubmissionRecord = {
-          id: `sub_${Date.now()}`,
-          team: compState.selectedTeam || 'Team Unassigned',
-          roundId: compState.activeRoundId,
-          roundTitle: activeRound.roundTitle,
-          activityTitle: activeRound.activityTitle,
-          startDatetime: timerState.startDatetime || now.toISOString(),
-          submissionDatetime: now.toISOString(),
-          durationSeconds: elapsedSecs,
-          attempts: (compState.attempts[compState.activeRoundId] || 0) + 1,
-          score: earnedScore,
-          status: 'COMPLETED',
-          code: currentCode,
-          testResultsSummary:
-            totalTests === 0
-              ? 'C program compiled and executed cleanly without errors.'
-              : `All ${totalTests} test cases passed successfully!`
-        };
-
-        setCompState((prev) => ({
-          ...prev,
-          timers: {
-            ...prev.timers,
-            [prev.activeRoundId]: {
-              ...prev.timers[prev.activeRoundId],
-              submitted: true,
-              submissionDatetime: now.toISOString(),
-              elapsedSeconds: elapsedSecs
-            }
-          },
-          submissions: [newSubmission, ...prev.submissions]
-        }));
-
-        setSubmitFeedback({
-          success: true,
-          message: `Submission Accepted! +${earnedScore} Points awarded.`,
-          details: `Solved in ${Math.floor(elapsedSecs / 60)}m ${elapsedSecs % 60}s with ${newSubmission.attempts} attempts.`
-        });
-      } else {
-        setSubmitFeedback({
-          success: false,
-          message:
-            totalTests === 0
-              ? 'Submission Rejected: Code failed to compile or run.'
-              : `Submission Rejected: Passed ${passedCount}/${totalTests} tests.`,
-          details: failureDetails
-        });
-
-        setCompState((prev) => ({
-          ...prev,
-          attempts: {
-            ...prev.attempts,
-            [prev.activeRoundId]: (prev.attempts[prev.activeRoundId] || 0) + 1
-          }
-        }));
       }
+
+      const summaryText = isAllPassed
+        ? (totalTests === 0
+            ? 'C program compiled and executed cleanly without errors.'
+            : `All ${totalTests} test cases passed successfully!`)
+        : (totalTests === 0
+            ? failureDetails
+            : `Passed ${passedCount}/${totalTests} tests. ${failureDetails}`);
+
+      const newSubmission: SubmissionRecord = {
+        id: `sub_${roundId}_${Date.now()}`,
+        teamId: teamName,
+        teamName,
+        roundId,
+        roundName: activeRound.roundTitle,
+        activityId: activeRound.activityTitle,
+        code: currentCode,
+        submittedAt: nowIso,
+        submissionType: 'MANUAL',
+        score: earnedScore,
+        timeLimitSeconds: timeLimitSecs,
+        startedAt: startIso,
+        completedAt: nowIso,
+        status: 'SUBMITTED',
+        team: teamName,
+        roundTitle: activeRound.roundTitle,
+        activityTitle: activeRound.activityTitle,
+        startDatetime: startIso,
+        submissionDatetime: nowIso,
+        durationSeconds: elapsedSecs,
+        attempts: (compState.attempts[roundId] || 0) + 1,
+        testResultsSummary: summaryText
+      };
+
+      setCompState((prev) => {
+        if (prev.submissions.some((s) => s.roundId === roundId)) {
+          return prev;
+        }
+        const nextTimers = {
+          ...prev.timers,
+          [roundId]: {
+            ...prev.timers[roundId],
+            submitted: true,
+            submissionDatetime: nowIso,
+            submissionType: 'MANUAL' as const,
+            elapsedSeconds: elapsedSecs
+          }
+        };
+        const updated: CompetitionState = {
+          ...prev,
+          timers: nextTimers,
+          submissions: [newSubmission, ...prev.submissions]
+        };
+        saveCompetitionState(updated);
+        return updated;
+      });
+
+      setSubmitFeedback({
+        success: isAllPassed,
+        message: 'Submitted ✓',
+        details: isAllPassed
+          ? `All tests passed! +${earnedScore} Points awarded. Solved in ${Math.floor(elapsedSecs / 60)}m ${elapsedSecs % 60}s.`
+          : `Submitted: Passed ${passedCount}/${totalTests || 1} tests. Score: ${earnedScore}. Round is locked.`
+      });
     } catch (err: any) {
       setSubmitFeedback({
         success: false,
@@ -357,6 +523,7 @@ export default function App() {
       });
     } finally {
       setIsSubmitting(false);
+      isSubmittingRef.current = false;
     }
   };
 
@@ -556,30 +723,49 @@ export default function App() {
 
         {/* Round Navigation Tabs */}
         <div className="flex items-center gap-1 bg-neutral-950/80 p-1 rounded-lg border border-neutral-800">
-          {(['round1_a', 'round1_b', 'round2', 'round3'] as RoundId[]).map((rId) => {
-            const r = ROUND_SPECS[rId];
+          {ROUND_ORDER.map((rId) => {
+            const status = getRoundStatus(rId, compState.timers, compState.submissions);
             const isSelected = compState.activeRoundId === rId;
-            const rTimer = compState.timers[rId];
+            const isLocked = status === 'LOCKED';
+            const isSubmitted = status === 'SUBMITTED';
 
             return (
               <button
                 key={rId}
                 id={`tab-round-${rId}`}
                 onClick={() => handleSelectRound(rId)}
+                disabled={isLocked}
+                title={
+                  isLocked
+                    ? 'Round locked. Complete the previous round first.'
+                    : isSubmitted
+                    ? 'Round completed & submitted (Read-only)'
+                    : 'Active competition round'
+                }
                 className={`px-3 py-1.5 rounded-md text-xs font-medium transition flex items-center gap-1.5 ${
                   isSelected
                     ? 'bg-neutral-800 text-white shadow-sm border border-neutral-700'
-                    : 'text-neutral-400 hover:text-neutral-200 hover:bg-neutral-900'
+                    : isLocked
+                    ? 'text-neutral-600 opacity-50 cursor-not-allowed'
+                    : 'text-neutral-400 hover:text-neutral-200 hover:bg-neutral-900 cursor-pointer'
                 }`}
               >
-                <span>{rId === 'round1_a' ? 'R1: Activity A' : rId === 'round1_b' ? 'R1: Activity B' : rId === 'round2' ? 'R2: Debug' : 'R3: Race'}</span>
-                {rTimer.submitted ? (
-                  <span className="w-2 h-2 rounded-full bg-emerald-400" />
-                ) : rTimer.timeOver ? (
-                  <span className="w-2 h-2 rounded-full bg-rose-500" />
-                ) : rTimer.started ? (
+                {isLocked ? (
+                  <Lock className="w-3 h-3 text-neutral-500" />
+                ) : isSubmitted ? (
+                  <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                ) : (
                   <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
-                ) : null}
+                )}
+                <span>
+                  {rId === 'round1_a'
+                    ? 'R1: Activity A'
+                    : rId === 'round1_b'
+                    ? 'R1: Activity B'
+                    : rId === 'round2'
+                    ? 'R2: Debug'
+                    : 'R3: Race'}
+                </span>
               </button>
             );
           })}
@@ -655,14 +841,45 @@ export default function App() {
                 START TIMER
               </button>
             ) : timerState.submitted ? (
-              <div className="px-3.5 py-1.5 rounded-md bg-emerald-950 border border-emerald-800 text-emerald-300 text-xs font-semibold flex items-center gap-1.5">
-                <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                SUBMITTED & LOCKED
+              <div className="flex items-center gap-2">
+                <div className="px-3.5 py-1.5 rounded-md bg-emerald-950 border border-emerald-800 text-emerald-300 text-xs font-semibold flex items-center gap-1.5">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                  {compState.timers[compState.activeRoundId]?.submissionType === 'AUTO_TIME_UP'
+                    ? 'Time expired — submission automatically recorded.'
+                    : 'Submitted ✓'}
+                </div>
+                <button
+                  id="next-round-header-btn"
+                  onClick={handleNextRound}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold transition shadow-sm cursor-pointer"
+                >
+                  {ROUND_ORDER.indexOf(compState.activeRoundId) < ROUND_ORDER.length - 1 ? (
+                    <>
+                      <span>Proceed to Next Round</span>
+                      <ChevronRight className="w-3.5 h-3.5" />
+                    </>
+                  ) : (
+                    <>
+                      <Trophy className="w-3.5 h-3.5 text-amber-400" />
+                      <span>View Final Results</span>
+                    </>
+                  )}
+                </button>
               </div>
             ) : timerState.timeOver ? (
-              <div className="px-3.5 py-1.5 rounded-md bg-rose-950 border border-rose-800 text-rose-300 text-xs font-bold flex items-center gap-1.5">
-                <AlertTriangle className="w-4 h-4 text-rose-400" />
-                TIME OVER — TERMINAL LOCKED
+              <div className="flex items-center gap-2">
+                <div className="px-3.5 py-1.5 rounded-md bg-rose-950 border border-rose-800 text-rose-300 text-xs font-bold flex items-center gap-1.5">
+                  <AlertTriangle className="w-4 h-4 text-rose-400" />
+                  Time expired — submission automatically recorded.
+                </div>
+                <button
+                  id="next-round-header-timeover-btn"
+                  onClick={handleNextRound}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-neutral-800 hover:bg-neutral-700 text-neutral-200 border border-neutral-700 text-xs font-semibold transition shadow-sm cursor-pointer"
+                >
+                  <span>Proceed to Next Round</span>
+                  <ChevronRight className="w-3.5 h-3.5" />
+                </button>
               </div>
             ) : (
               <div className="px-3 py-1.5 rounded-md bg-amber-950/60 border border-amber-800/80 text-amber-300 text-xs font-semibold flex items-center gap-2">
@@ -890,6 +1107,12 @@ Row 9: 4 leading spaces + 1 star`}
               <span className="text-xs font-mono text-neutral-300 font-medium">
                 solution.c <span className="text-neutral-500">(C11 Browser Runtime)</span>
               </span>
+              {timerState.submitted && (
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-950 border border-emerald-800 text-emerald-300 font-semibold flex items-center gap-1">
+                  <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                  SUBMITTED (READ-ONLY)
+                </span>
+              )}
             </div>
             <div className="flex items-center gap-2">
               <button
@@ -921,7 +1144,7 @@ Row 9: 4 leading spaces + 1 star`}
               </div>
             )}
 
-            {timerState.timeOver && (
+            {timerState.timeOver && !timerState.submitted && (
               <div className="absolute inset-0 z-20 bg-neutral-950/85 backdrop-blur-sm flex flex-col items-center justify-center text-rose-400 font-mono text-center p-4">
                 <AlertTriangle className="w-10 h-10 text-rose-500 mb-2" />
                 <span className="text-sm font-bold uppercase tracking-wider">
@@ -970,7 +1193,7 @@ Row 9: 4 leading spaces + 1 star`}
               id="stdin-input-textarea"
               rows={2}
               value={currentStdin}
-              disabled={timerState.timeOver}
+              disabled={isEditorDisabled}
               onChange={(e) =>
                 setCompState((prev) => ({
                   ...prev,
@@ -980,8 +1203,8 @@ Row 9: 4 leading spaces + 1 star`}
                   }
                 }))
               }
-              className="w-full p-2 text-xs font-mono bg-neutral-950 rounded border border-neutral-800 text-neutral-200 resize-none outline-none focus:border-neutral-700"
-              placeholder="Provide standard input for testing..."
+              className="w-full p-2 text-xs font-mono bg-neutral-950 rounded border border-neutral-800 text-neutral-200 resize-none outline-none focus:border-neutral-700 disabled:opacity-40 disabled:cursor-not-allowed"
+              placeholder={isEditorDisabled ? 'Stdin locked after submission.' : 'Provide standard input for testing...'}
             />
 
             <div className="flex items-center justify-between pt-1">
@@ -990,8 +1213,8 @@ Row 9: 4 leading spaces + 1 star`}
                   <button
                     id="run-code-btn"
                     onClick={handleRunCode}
-                    disabled={isRunning || isSubmitting || timerState.timeOver}
-                    className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold transition disabled:opacity-40 shadow-sm"
+                    disabled={isRunning || isSubmitting || isEditorDisabled}
+                    className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold transition disabled:opacity-40 shadow-sm cursor-pointer disabled:cursor-not-allowed"
                   >
                     <Play className="w-3.5 h-3.5 fill-current" />
                     {isRunning ? 'Running...' : 'RUN CODE'}
@@ -1008,10 +1231,44 @@ Row 9: 4 leading spaces + 1 star`}
                     timerState.submitted ||
                     timerState.timeOver
                   }
-                  className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold transition disabled:opacity-40 shadow-sm"
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold transition disabled:opacity-40 shadow-sm cursor-pointer disabled:cursor-not-allowed"
                 >
                   <Send className="w-3.5 h-3.5" />
-                  {isSubmitting ? 'Verifying...' : 'SUBMIT CODE'}
+                  {isSubmitting
+                    ? 'Verifying...'
+                    : timerState.submitted
+                    ? (compState.timers[compState.activeRoundId]?.submissionType === 'AUTO_TIME_UP'
+                        ? 'AUTO-SUBMITTED'
+                        : 'SUBMITTED ✓')
+                    : 'SUBMIT CODE'}
+                </button>
+
+                <button
+                  id="next-round-btn"
+                  onClick={handleNextRound}
+                  disabled={!timerState.submitted}
+                  title={
+                    timerState.submitted
+                      ? 'Proceed to next round'
+                      : 'Complete and submit this round to unlock next round'
+                  }
+                  className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-semibold transition shadow-sm ${
+                    timerState.submitted
+                      ? 'bg-emerald-600 hover:bg-emerald-500 text-white cursor-pointer ring-2 ring-emerald-400/30 animate-pulse'
+                      : 'bg-neutral-800 text-neutral-500 cursor-not-allowed opacity-50 border border-neutral-700'
+                  }`}
+                >
+                  {ROUND_ORDER.indexOf(compState.activeRoundId) < ROUND_ORDER.length - 1 ? (
+                    <>
+                      <span>NEXT ROUND</span>
+                      <ChevronRight className="w-3.5 h-3.5" />
+                    </>
+                  ) : (
+                    <>
+                      <Trophy className="w-3.5 h-3.5 text-amber-400" />
+                      <span>COMPETITION COMPLETE • VIEW RESULTS</span>
+                    </>
+                  )}
                 </button>
               </div>
 
