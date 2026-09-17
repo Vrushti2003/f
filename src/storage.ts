@@ -29,26 +29,26 @@ export function getInitialTimerState(roundId: RoundId): RoundTimerState {
 export function getRoundStatus(
   roundId: RoundId,
   timers: Record<RoundId, RoundTimerState>,
-  submissions: SubmissionRecord[]
+  submissions: SubmissionRecord[],
+  activeSectionId?: RoundId | null
 ): RoundStatus {
   if (timers[roundId]?.submitted || submissions.some((s) => s.roundId === roundId)) {
     return 'SUBMITTED';
   }
 
-  const idx = ROUND_ORDER.indexOf(roundId);
-  if (idx === 0) {
-    return 'ACTIVE';
+  const currentRunning =
+    activeSectionId !== undefined
+      ? activeSectionId
+      : (ROUND_ORDER.find((r) => timers[r]?.started && !timers[r]?.submitted && !timers[r]?.timeOver) || null);
+
+  if (currentRunning) {
+    if (currentRunning === roundId) {
+      return 'ACTIVE';
+    }
+    return 'LOCKED';
   }
 
-  const prevRoundId = ROUND_ORDER[idx - 1];
-  const isPrevSubmitted =
-    timers[prevRoundId]?.submitted || submissions.some((s) => s.roundId === prevRoundId);
-
-  if (isPrevSubmitted) {
-    return 'ACTIVE';
-  }
-
-  return 'LOCKED';
+  return 'READY';
 }
 
 export function getInitialState(): CompetitionState {
@@ -83,6 +83,7 @@ export function getInitialState(): CompetitionState {
   return {
     selectedTeam: null,
     activeRoundId: 'round1_a',
+    activeSectionId: null,
     timers: defaultTimers,
     editorCode: defaultEditorCode,
     standardInput: defaultStandardInput,
@@ -103,6 +104,7 @@ export function processExpiredTimersOnLoad(state: CompetitionState): Competition
   let modified = false;
   const newSubmissions = [...state.submissions];
   const newTimers = { ...state.timers };
+  let runningSection: RoundId | null = state.activeSectionId || null;
 
   for (const roundId of ROUND_ORDER) {
     const timer = newTimers[roundId];
@@ -156,9 +158,24 @@ export function processExpiredTimersOnLoad(state: CompetitionState): Competition
           submissionType: 'AUTO_TIME_UP',
           elapsedSeconds: durationSecs
         };
+
+        if (runningSection === roundId) {
+          runningSection = null;
+        }
+      } else {
+        // Still actively running
+        runningSection = roundId;
       }
     }
   }
+
+  // Ensure runningSection is actually running and not submitted
+  if (runningSection && (newTimers[runningSection]?.submitted || newSubmissions.some((s) => s.roundId === runningSection))) {
+    runningSection = null;
+    modified = true;
+  }
+
+  state.activeSectionId = runningSection;
 
   if (modified) {
     state.submissions = newSubmissions;
@@ -166,14 +183,9 @@ export function processExpiredTimersOnLoad(state: CompetitionState): Competition
     saveCompetitionState(state);
   }
 
-  // Ensure activeRoundId is never a LOCKED round
-  const statusOfCurrent = getRoundStatus(state.activeRoundId, state.timers, state.submissions);
-  if (statusOfCurrent === 'LOCKED') {
-    const validRound = ROUND_ORDER.find(
-      (r) => getRoundStatus(r, state.timers, state.submissions) === 'ACTIVE'
-    ) || 'round1_a';
-    state.activeRoundId = validRound;
-    saveCompetitionState(state);
+  // If a section is actively running, lock the active view to that section
+  if (state.activeSectionId) {
+    state.activeRoundId = state.activeSectionId;
   }
 
   return state;
@@ -217,6 +229,7 @@ export function loadCompetitionState(): CompetitionState {
     const loadedState: CompetitionState = {
       selectedTeam: parsed.selectedTeam || null,
       activeRoundId: parsed.activeRoundId || 'round1_a',
+      activeSectionId: parsed.activeSectionId !== undefined ? parsed.activeSectionId : null,
       timers: { ...initial.timers, ...(parsed.timers || {}) },
       editorCode,
       standardInput,

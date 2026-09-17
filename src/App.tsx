@@ -218,6 +218,7 @@ export default function App() {
       };
       const updated: CompetitionState = {
         ...prev,
+        activeSectionId: null,
         timers: nextTimers,
         submissions: [autoSubmission, ...prev.submissions]
       };
@@ -234,8 +235,9 @@ export default function App() {
     isSubmittingRef.current = false;
   }, []);
 
-  // Trigger auto-submit when remainingSeconds reaches 0
+  // Trigger auto-submit when timer reaches 00:00
   useEffect(() => {
+    // Check if the current viewed round has reached 00:00
     if (
       timerState.started &&
       !timerState.submitted &&
@@ -243,8 +245,46 @@ export default function App() {
       remainingSeconds <= 0
     ) {
       handleAutoSubmit(compState.activeRoundId);
+      return;
     }
-  }, [remainingSeconds, timerState.started, timerState.submitted, timerState.timeOver, compState.activeRoundId, handleAutoSubmit]);
+
+    // Check if the globally active section has reached 00:00
+    const runningId = compState.activeSectionId;
+    if (runningId && runningId !== compState.activeRoundId) {
+      const activeTimer = compState.timers[runningId];
+      if (activeTimer && activeTimer.started && !activeTimer.submitted && !activeTimer.timeOver && activeTimer.startDatetime) {
+        const startTime = new Date(activeTimer.startDatetime).getTime();
+        const spec = ROUND_SPECS[runningId];
+        const durationMs = spec.durationMinutes * 60 * 1000;
+        const adjustMs = runningId === 'round3' ? (compState.powerCardEffects?.timeAdjustSeconds || 0) * 1000 : 0;
+        const deadlineMs = startTime + durationMs + adjustMs;
+        if (currentTimeMs >= deadlineMs) {
+          handleAutoSubmit(runningId);
+        }
+      }
+    }
+  }, [
+    remainingSeconds,
+    timerState.started,
+    timerState.submitted,
+    timerState.timeOver,
+    compState.activeRoundId,
+    compState.activeSectionId,
+    compState.timers,
+    compState.powerCardEffects?.timeAdjustSeconds,
+    currentTimeMs,
+    handleAutoSubmit
+  ]);
+
+  // Keep submitted rounds set in sync to prevent any duplicate submissions
+  useEffect(() => {
+    compState.submissions.forEach((s) => submittedRoundsRef.current.add(s.roundId));
+    ROUND_ORDER.forEach((rId) => {
+      if (compState.timers[rId]?.submitted) {
+        submittedRoundsRef.current.add(rId);
+      }
+    });
+  }, [compState.submissions, compState.timers]);
 
   // Freeze countdown check
   const isKeyboardFrozen = useMemo(() => {
@@ -258,15 +298,17 @@ export default function App() {
     return Math.max(0, Math.ceil((compState.powerCardEffects.freezeUntil - currentTimeMs) / 1000));
   }, [isKeyboardFrozen, compState.powerCardEffects.freezeUntil, currentTimeMs]);
 
-  // Strict Sequential Round Selection
+  // Unsubmitted rounds remaining
+  const unsubmittedRounds = useMemo(() => {
+    return ROUND_ORDER.filter(
+      (rId) => !compState.timers[rId]?.submitted && !compState.submissions.some((s) => s.roundId === rId)
+    );
+  }, [compState.timers, compState.submissions]);
+
+  // Round Selection (Users are allowed to view/start ANY section in ANY order)
   const handleSelectRound = (targetRoundId: RoundId) => {
-    const status = getRoundStatus(targetRoundId, compState.timers, compState.submissions);
-    if (status === 'LOCKED') {
-      // Future round is strictly locked before current round submission
-      return;
-    }
     setCompState((prev) => {
-      const updated = {
+      const updated: CompetitionState = {
         ...prev,
         activeRoundId: targetRoundId
       };
@@ -277,19 +319,15 @@ export default function App() {
     setDiagnosticError(null);
   };
 
-  // Next Round Navigation
+  // Next Round / Section Navigation
   const handleNextRound = () => {
-    const currentStatus = getRoundStatus(compState.activeRoundId, compState.timers, compState.submissions);
-    if (currentStatus !== 'SUBMITTED') {
-      // Must submit current round before moving to next
-      return;
-    }
+    if (unsubmittedRounds.length > 0) {
+      const nextRoundId = unsubmittedRounds.includes(compState.activeRoundId)
+        ? unsubmittedRounds.find((r) => r !== compState.activeRoundId) || unsubmittedRounds[0]
+        : unsubmittedRounds[0];
 
-    const currentIdx = ROUND_ORDER.indexOf(compState.activeRoundId);
-    if (currentIdx < ROUND_ORDER.length - 1) {
-      const nextRoundId = ROUND_ORDER[currentIdx + 1];
       setCompState((prev) => {
-        const updated = {
+        const updated: CompetitionState = {
           ...prev,
           activeRoundId: nextRoundId
         };
@@ -300,24 +338,32 @@ export default function App() {
       setDiagnosticError(null);
       setStdout('');
     } else {
-      // Final round submitted -> view results
+      // All rounds submitted -> view results
       setIsResultsOpen(true);
     }
   };
 
-  // Start Timer
+  // Start Section Timer (Only ONE section can have a running timer at a time)
   const handleStartTimer = () => {
-    if (timerState.started) return;
+    const roundId = compState.activeRoundId;
+    if (compState.timers[roundId]?.started || compState.timers[roundId]?.submitted) return;
+
+    if (compState.activeSectionId && compState.activeSectionId !== roundId) {
+      alert('Complete the active section first.');
+      return;
+    }
+
     const now = new Date();
     const end = new Date(now.getTime() + activeRound.durationMinutes * 60 * 1000);
 
     setCompState((prev) => {
-      const updated = {
+      const updated: CompetitionState = {
         ...prev,
+        activeSectionId: roundId,
         timers: {
           ...prev.timers,
-          [prev.activeRoundId]: {
-            ...prev.timers[prev.activeRoundId],
+          [roundId]: {
+            ...prev.timers[roundId],
             started: true,
             startDatetime: now.toISOString(),
             endDatetime: end.toISOString(),
@@ -501,6 +547,7 @@ export default function App() {
         };
         const updated: CompetitionState = {
           ...prev,
+          activeSectionId: null,
           timers: nextTimers,
           submissions: [newSubmission, ...prev.submissions]
         };
@@ -695,8 +742,15 @@ export default function App() {
     }));
   };
 
+  const isAnotherSectionActive =
+    compState.activeSectionId !== null && compState.activeSectionId !== compState.activeRoundId;
+
   const isEditorDisabled =
-    timerState.timeOver || timerState.submitted || isKeyboardFrozen;
+    timerState.timeOver ||
+    timerState.submitted ||
+    isKeyboardFrozen ||
+    !timerState.started ||
+    isAnotherSectionActive;
 
   return (
     <div className="min-h-screen bg-neutral-950 text-neutral-100 flex flex-col font-sans selection:bg-neutral-800 selection:text-neutral-100">
@@ -724,38 +778,44 @@ export default function App() {
         {/* Round Navigation Tabs */}
         <div className="flex items-center gap-1 bg-neutral-950/80 p-1 rounded-lg border border-neutral-800">
           {ROUND_ORDER.map((rId) => {
-            const status = getRoundStatus(rId, compState.timers, compState.submissions);
+            const status = getRoundStatus(rId, compState.timers, compState.submissions, compState.activeSectionId);
             const isSelected = compState.activeRoundId === rId;
             const isLocked = status === 'LOCKED';
             const isSubmitted = status === 'SUBMITTED';
+            const isActiveRunning = status === 'ACTIVE';
 
             return (
               <button
                 key={rId}
                 id={`tab-round-${rId}`}
                 onClick={() => handleSelectRound(rId)}
-                disabled={isLocked}
                 title={
                   isLocked
-                    ? 'Round locked. Complete the previous round first.'
+                    ? `Section locked. Complete the active section (${compState.activeSectionId ? ROUND_SPECS[compState.activeSectionId].roundTitle : 'current'}) first.`
                     : isSubmitted
-                    ? 'Round completed & submitted (Read-only)'
-                    : 'Active competition round'
+                    ? 'Section completed & submitted (Read-only)'
+                    : isActiveRunning
+                    ? 'Active section timer running'
+                    : 'Available section (Ready to start in any order)'
                 }
-                className={`px-3 py-1.5 rounded-md text-xs font-medium transition flex items-center gap-1.5 ${
+                className={`px-3 py-1.5 rounded-md text-xs font-medium transition flex items-center gap-1.5 cursor-pointer ${
                   isSelected
                     ? 'bg-neutral-800 text-white shadow-sm border border-neutral-700'
                     : isLocked
-                    ? 'text-neutral-600 opacity-50 cursor-not-allowed'
-                    : 'text-neutral-400 hover:text-neutral-200 hover:bg-neutral-900 cursor-pointer'
+                    ? 'text-neutral-500 hover:text-neutral-400 hover:bg-neutral-900/60'
+                    : isSubmitted
+                    ? 'text-neutral-400 hover:text-neutral-200 hover:bg-neutral-900'
+                    : 'text-neutral-300 hover:text-neutral-100 hover:bg-neutral-900'
                 }`}
               >
-                {isLocked ? (
-                  <Lock className="w-3 h-3 text-neutral-500" />
-                ) : isSubmitted ? (
+                {isSubmitted ? (
                   <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                ) : isActiveRunning ? (
+                  <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping" />
+                ) : isLocked ? (
+                  <Lock className="w-3 h-3 text-amber-500/70" />
                 ) : (
-                  <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
+                  <span className="w-2 h-2 rounded-full bg-neutral-500" />
                 )}
                 <span>
                   {rId === 'round1_a'
@@ -766,6 +826,11 @@ export default function App() {
                     ? 'R2: Debug'
                     : 'R3: Race'}
                 </span>
+                {isActiveRunning && (
+                  <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-amber-950 text-amber-300 border border-amber-800 font-bold">
+                    ACTIVE
+                  </span>
+                )}
               </button>
             );
           })}
@@ -831,15 +896,36 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-2">
-            {!timerState.started ? (
-              <button
-                id="start-timer-btn"
-                onClick={handleStartTimer}
-                className="flex items-center gap-2 px-5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs transition shadow-md shadow-emerald-900/30"
-              >
-                <Play className="w-3.5 h-3.5 fill-current" />
-                START TIMER
-              </button>
+            {!timerState.started && !timerState.submitted ? (
+              isAnotherSectionActive ? (
+                <div className="flex items-center gap-2">
+                  <button
+                    id="start-timer-btn-disabled"
+                    disabled={true}
+                    className="flex items-center gap-2 px-3.5 py-2 rounded-lg bg-neutral-800 border border-neutral-700 text-neutral-400 font-semibold text-xs cursor-not-allowed opacity-80"
+                    title="Complete the active section first."
+                  >
+                    <Lock className="w-3.5 h-3.5 text-amber-400" />
+                    Complete the active section first.
+                  </button>
+                  <button
+                    onClick={() => handleSelectRound(compState.activeSectionId!)}
+                    className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 text-white font-semibold text-xs transition shadow-sm cursor-pointer"
+                  >
+                    <span>Switch to Active ({ROUND_SPECS[compState.activeSectionId!].roundTitle})</span>
+                    <ChevronRight className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              ) : (
+                <button
+                  id="start-timer-btn"
+                  onClick={handleStartTimer}
+                  className="flex items-center gap-2 px-5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs transition shadow-md shadow-emerald-900/30 cursor-pointer"
+                >
+                  <Play className="w-3.5 h-3.5 fill-current" />
+                  START TIMER
+                </button>
+              )
             ) : timerState.submitted ? (
               <div className="flex items-center gap-2">
                 <div className="px-3.5 py-1.5 rounded-md bg-emerald-950 border border-emerald-800 text-emerald-300 text-xs font-semibold flex items-center gap-1.5">
@@ -853,9 +939,9 @@ export default function App() {
                   onClick={handleNextRound}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold transition shadow-sm cursor-pointer"
                 >
-                  {ROUND_ORDER.indexOf(compState.activeRoundId) < ROUND_ORDER.length - 1 ? (
+                  {unsubmittedRounds.length > 0 ? (
                     <>
-                      <span>Proceed to Next Round</span>
+                      <span>Choose Next Section</span>
                       <ChevronRight className="w-3.5 h-3.5" />
                     </>
                   ) : (
@@ -877,8 +963,17 @@ export default function App() {
                   onClick={handleNextRound}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-neutral-800 hover:bg-neutral-700 text-neutral-200 border border-neutral-700 text-xs font-semibold transition shadow-sm cursor-pointer"
                 >
-                  <span>Proceed to Next Round</span>
-                  <ChevronRight className="w-3.5 h-3.5" />
+                  {unsubmittedRounds.length > 0 ? (
+                    <>
+                      <span>Choose Next Section</span>
+                      <ChevronRight className="w-3.5 h-3.5" />
+                    </>
+                  ) : (
+                    <>
+                      <Trophy className="w-3.5 h-3.5 text-amber-400" />
+                      <span>View Final Results</span>
+                    </>
+                  )}
                 </button>
               </div>
             ) : (
@@ -1156,6 +1251,24 @@ Row 9: 4 leading spaces + 1 star`}
               </div>
             )}
 
+            {isAnotherSectionActive && !timerState.submitted && (
+              <div className="absolute inset-0 z-20 bg-neutral-950/85 backdrop-blur-sm flex flex-col items-center justify-center text-amber-300 font-mono text-center p-6 space-y-3">
+                <Lock className="w-10 h-10 text-amber-400 animate-pulse" />
+                <span className="text-sm font-bold uppercase tracking-wider text-amber-200">
+                  Section Locked
+                </span>
+                <span className="text-xs text-neutral-300 max-w-md">
+                  Complete the active section first. <strong>{ROUND_SPECS[compState.activeSectionId!].roundTitle}</strong> is currently running.
+                </span>
+                <button
+                  onClick={() => handleSelectRound(compState.activeSectionId!)}
+                  className="px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold transition shadow-md cursor-pointer"
+                >
+                  Return to Active Section
+                </button>
+              </div>
+            )}
+
             <textarea
               id="c-code-editor-textarea"
               value={currentCode}
@@ -1204,7 +1317,15 @@ Row 9: 4 leading spaces + 1 star`}
                 }))
               }
               className="w-full p-2 text-xs font-mono bg-neutral-950 rounded border border-neutral-800 text-neutral-200 resize-none outline-none focus:border-neutral-700 disabled:opacity-40 disabled:cursor-not-allowed"
-              placeholder={isEditorDisabled ? 'Stdin locked after submission.' : 'Provide standard input for testing...'}
+              placeholder={
+                isAnotherSectionActive
+                  ? 'Complete the active section first.'
+                  : !timerState.started
+                  ? 'Click START TIMER to begin testing and editing code...'
+                  : isEditorDisabled
+                  ? 'Stdin locked after submission.'
+                  : 'Provide standard input for testing...'
+              }
             />
 
             <div className="flex items-center justify-between pt-1">
@@ -1229,7 +1350,8 @@ Row 9: 4 leading spaces + 1 star`}
                     isSubmitting ||
                     !timerState.started ||
                     timerState.submitted ||
-                    timerState.timeOver
+                    timerState.timeOver ||
+                    isAnotherSectionActive
                   }
                   className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold transition disabled:opacity-40 shadow-sm cursor-pointer disabled:cursor-not-allowed"
                 >
@@ -1249,18 +1371,20 @@ Row 9: 4 leading spaces + 1 star`}
                   disabled={!timerState.submitted}
                   title={
                     timerState.submitted
-                      ? 'Proceed to next round'
-                      : 'Complete and submit this round to unlock next round'
+                      ? unsubmittedRounds.length > 0
+                        ? 'Choose next section'
+                        : 'View final results'
+                      : 'Complete and submit this section first'
                   }
                   className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-semibold transition shadow-sm ${
                     timerState.submitted
-                      ? 'bg-emerald-600 hover:bg-emerald-500 text-white cursor-pointer ring-2 ring-emerald-400/30 animate-pulse'
+                      ? 'bg-emerald-600 hover:bg-emerald-500 text-white cursor-pointer ring-2 ring-emerald-400/30'
                       : 'bg-neutral-800 text-neutral-500 cursor-not-allowed opacity-50 border border-neutral-700'
                   }`}
                 >
-                  {ROUND_ORDER.indexOf(compState.activeRoundId) < ROUND_ORDER.length - 1 ? (
+                  {unsubmittedRounds.length > 0 ? (
                     <>
-                      <span>NEXT ROUND</span>
+                      <span>CHOOSE NEXT SECTION</span>
                       <ChevronRight className="w-3.5 h-3.5" />
                     </>
                   ) : (

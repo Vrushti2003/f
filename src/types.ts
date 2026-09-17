@@ -2,7 +2,7 @@ export type TeamId = string; // e.g. "Team 01" to "Team 22"
 
 export type RoundId = 'round1_a' | 'round1_b' | 'round2' | 'round3';
 
-export type RoundStatus = 'LOCKED' | 'ACTIVE' | 'SUBMITTED';
+export type RoundStatus = 'LOCKED' | 'ACTIVE' | 'SUBMITTED' | 'READY';
 
 export type SubmissionType = 'MANUAL' | 'AUTO_TIME_UP';
 
@@ -94,6 +94,7 @@ export interface RoundTimerState {
 export interface CompetitionState {
   selectedTeam: TeamId | null;
   activeRoundId: RoundId;
+  activeSectionId: RoundId | null;
   timers: Record<RoundId, RoundTimerState>;
   editorCode: Record<RoundId, string>;
   standardInput: Record<RoundId, string>;
