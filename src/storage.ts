@@ -207,21 +207,21 @@ export function loadCompetitionState(): CompetitionState {
     if (editorCode.round1_a && (editorCode.round1_a.includes('gestures') || editorCode.round1_a.includes('FLAGGED') || editorCode.round1_a.includes('token[10]'))) {
       editorCode.round1_a = initial.editorCode.round1_a;
     }
-    // Auto-update Round 1B if still containing legacy RLE code
-    if (editorCode.round1_b && (editorCode.round1_b.includes('RLE') || editorCode.round1_b.includes('strlen') || editorCode.round1_b.includes('str[105]'))) {
-      editorCode.round1_b = initial.editorCode.round1_b;
+    // Auto-update Round 1B if still containing legacy RLE or Even/Odd boilerplate code
+    if (editorCode.round1_b && (editorCode.round1_b.includes('RLE') || editorCode.round1_b.includes('strlen') || editorCode.round1_b.includes('Even or Odd') || editorCode.round1_b.includes('int n;') || editorCode.round1_b.includes('#include <stdio.h>'))) {
+      editorCode.round1_b = '';
     }
     // Auto-update Round 2 if still containing legacy test scores code
     if (editorCode.round2 && (editorCode.round2.includes('scores[100]') || editorCode.round2.includes('min_val') || editorCode.round2.includes('BUG 1:'))) {
       editorCode.round2 = initial.editorCode.round2;
     }
-    // Auto-update Round 3 if still containing legacy Grid Vault code
-    if (editorCode.round3 && (editorCode.round3.includes('grid[MAX]') || editorCode.round3.includes('dp[MAX]') || editorCode.round3.includes('energy cost'))) {
+    // Auto-update Round 3 if still containing legacy Diamond or Grid Vault code
+    if (editorCode.round3 && (editorCode.round3.includes('grid[MAX]') || editorCode.round3.includes('dp[MAX]') || editorCode.round3.includes('energy cost') || editorCode.round3.includes('star pattern') || editorCode.round3.includes('int n = 5;') || editorCode.round3.includes('REFERENCE STAR PATTERN'))) {
       editorCode.round3 = initial.editorCode.round3;
     }
 
     const standardInput = { ...initial.standardInput, ...(parsed.standardInput || {}) };
-    if (standardInput.round2 && standardInput.round2.includes('70 85 90 60 75')) {
+    if (standardInput.round2 && (standardInput.round2.includes('70 85 90 60 75') || standardInput.round2.includes('10 20 30 40 50 60 70 80'))) {
       standardInput.round2 = initial.standardInput.round2;
     }
     if (standardInput.round1_a && standardInput.round1_a.includes('A B B B C D E')) {
@@ -230,7 +230,7 @@ export function loadCompetitionState(): CompetitionState {
     if (standardInput.round1_b && standardInput.round1_b.includes('AAABBBCCDAA')) {
       standardInput.round1_b = initial.standardInput.round1_b;
     }
-    if (standardInput.round3 && (standardInput.round3.includes('3 3') || standardInput.round3.includes('1 3 1'))) {
+    if (standardInput.round3 && (standardInput.round3 === '5' || standardInput.round3.includes('3 3') || standardInput.round3.includes('1 3 1'))) {
       standardInput.round3 = initial.standardInput.round3;
     }
 

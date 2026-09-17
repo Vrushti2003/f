@@ -55,17 +55,7 @@ Output: Odd`,
     sampleInput: `10`,
     sampleOutput: `Even`,
     explanation: '10 is divisible by 2 with no remainder, so it is Even.',
-    starterCode: `#include <stdio.h>
-
-int main() {
-    int n;
-    if (scanf("%d", &n) != 1) return 0;
-    
-    // Write your code here to check whether n is Even or Odd:
-    
-    return 0;
-}
-`,
+    starterCode: '',
     testCases: [
       {
         input: `10`,
@@ -101,32 +91,11 @@ int main() {
     activityTitle: 'Debugging Challenge',
     durationMinutes: 20,
     maxPoints: 100,
-    description: `Analyze and debug the given C program.
-
-The program performs array operations:
-1. Prompts for and reads 8 integers into an array.
-2. Calculates and displays the total (sum), average, and maximum of the numbers.
-3. Prompts for an integer to search for and prints its 1-based position, or displays "Number not found".
-4. Reverses the array and displays the reversed numbers.
-
-Examine the code carefully, identify and fix all syntax, compilation, logic, and runtime errors so that the program runs correctly.
-Note: In Round 2, the "Run Code" button is disabled. Review your fixes directly and click "SUBMIT CODE" when ready.`,
-    constraints: [
-      'Array size is fixed at 8 integers',
-      'Preserve the original program structure and function declarations',
-      'The code runner is disabled in Round 2 — inspect thoroughly and submit when ready'
-    ],
-    sampleInput: `10 20 30 40 50 60 70 80
-50`,
-    sampleOutput: `Enter 8 numbers:
-
-Total = 360
-Average = 45
-Maximum = 80
-
-Enter number to search: Found at position 5
-Reversed array: 80 70 60 50 40 30 20 10`,
-    explanation: 'The program reads 8 numbers, prints their total (sum), average, maximum, searches for key 50 at 1-based position 5, and prints the reversed array.',
+    description: 'Debug the given C program and fix the errors.',
+    constraints: [],
+    sampleInput: '',
+    sampleOutput: '',
+    explanation: '',
     starterCode: `#include <stdio.h>
 
 FLOAT average(int total, int n)
@@ -237,74 +206,42 @@ int main()
   round3: {
     id: 'round3',
     roundTitle: 'ROUND 3',
-    activityTitle: 'Final Coding Race: Print the Given Star Pattern',
+    activityTitle: 'Hollow Hexagon Pattern',
     durationMinutes: 30,
     maxPoints: 150,
-    description: `FINAL CODING RACE: Print the Given Star Pattern
+    description: `Write a C program to print the following Hollow Hexagon pattern using asterisks (*).
 
-Write a C program to display the exact star pattern shown below using nested loops.
-First team to submit a correct solution wins the race!
+The output must match the following pattern exactly, including spacing and alignment.
 
-REFERENCE STAR PATTERN:
-    *
-   ***
-  *****
- *******
-*********
- *******
-  *****
-   ***
-    *
+EXPECTED PATTERN:
 
-PATTERN STRUCTURE:
-Row 1: 4 leading spaces + 1 star
-Row 2: 3 leading spaces + 3 stars
-Row 3: 2 leading spaces + 5 stars
-Row 4: 1 leading space + 7 stars
-Row 5: 0 leading spaces + 9 stars
-Row 6: 1 leading space + 7 stars
-Row 7: 2 leading spaces + 5 stars
-Row 8: 3 leading spaces + 3 stars
-Row 9: 4 leading spaces + 1 star
-
-INPUT INSTRUCTIONS:
-- You may read N from standard input (where N = 5 for this pattern), OR use loops to generate the 5-row diamond directly.
-- Both methods are fully accepted!
-- Standard test input supplies: 5`,
+    *****
+   *     *
+  *       *
+ *         *
+  *       *
+   *     *
+    *****`,
     constraints: [
-      'Students must use loops (for / while) to generate the pattern',
-      'Total pattern height is 9 rows (upper pyramid has N = 5 rows)',
-      'Output matches the exact row alignment and star counts',
+      'The output must match the pattern exactly, including spacing and alignment',
       'Time Limit: 2.5 seconds per test case'
     ],
-    sampleInput: `5`,
-    sampleOutput: `    *
-   ***
-  *****
- *******
-*********
- *******
-  *****
-   ***
-    *`,
-    explanation: 'Symmetric diamond pattern with N = 5 rows in the upper half and 4 rows in the lower half.',
+    sampleInput: '',
+    sampleOutput: `    *****\n   *     *\n  *       *\n *         *\n  *       *\n   *     *\n    *****`,
+    explanation: '',
     starterCode: `#include <stdio.h>
 
 int main() {
-    int n = 5;
-    // Optional: read n from input:
-    // scanf("%d", &n);
-
-    // Write your nested loop logic below to print the star pattern:
+    // Write your C program here to print the Hollow Hexagon pattern:
     
     return 0;
 }
 `,
     testCases: [
       {
-        input: `5`,
-        expectedOutput: `    *\n   ***\n  *****\n *******\n*********\n *******\n  *****\n   ***\n    *\n`,
-        description: 'Reference Pattern: N = 5 Diamond'
+        input: ``,
+        expectedOutput: `    *****\n   *     *\n  *       *\n *         *\n  *       *\n   *     *\n    *****\n`,
+        description: 'Test 1: Exact Hollow Hexagon Pattern'
       }
     ]
   }

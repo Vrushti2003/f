@@ -468,6 +468,17 @@ export default function App() {
             }
           }
 
+          if (!isMatch && roundId === 'round3') {
+            const actualLines = normalizedActual.replace(/\r/g, '').split('\n').map((l) => l.trimEnd());
+            const expectedLines = normalizedExpected.replace(/\r/g, '').split('\n').map((l) => l.trimEnd());
+            if (
+              actualLines.length === expectedLines.length &&
+              actualLines.every((line, idx) => line === expectedLines[idx])
+            ) {
+              isMatch = true;
+            }
+          }
+
           if (isMatch) {
             passedCount++;
             setStdout((prev) => prev + `[PASSED]\n`);
@@ -1082,54 +1093,31 @@ export default function App() {
             {compState.activeRoundId === 'round3' ? (
               <div className="text-xs text-neutral-300 bg-neutral-900/60 p-3.5 rounded-lg border border-neutral-800 space-y-3.5">
                 <p className="leading-relaxed">
-                  Write a C program to display the exact star pattern shown below using nested loops. First team to submit a correct solution wins the race!
+                  Write a C program to print the following Hollow Hexagon pattern using asterisks (*).
+                </p>
+                <p className="leading-relaxed">
+                  The output must match the following pattern exactly, including spacing and alignment.
                 </p>
 
                 <div className="space-y-1.5">
                   <div className="text-[11px] font-semibold text-neutral-400 uppercase tracking-wider font-mono">
-                    Reference Star Pattern:
+                    EXPECTED PATTERN:
                   </div>
                   <pre className="text-xs font-mono font-bold text-emerald-400 bg-neutral-950 p-3.5 rounded-lg border border-neutral-800 whitespace-pre overflow-x-auto leading-snug">
-{`    *
-   ***
-  *****
- *******
-*********
- *******
-  *****
-   ***
-    *`}
+{`    *****
+   *     *
+  *       *
+ *         *
+  *       *
+   *     *
+    *****`}
                   </pre>
-                </div>
-
-                <div className="space-y-1.5">
-                  <div className="text-[11px] font-semibold text-neutral-400 uppercase tracking-wider font-mono">
-                    Pattern Structure:
-                  </div>
-                  <pre className="text-xs font-mono text-neutral-300 bg-neutral-950/70 p-3 rounded-lg border border-neutral-800 whitespace-pre overflow-x-auto leading-relaxed">
-{`Row 1: 4 leading spaces + 1 star
-Row 2: 3 leading spaces + 3 stars
-Row 3: 2 leading spaces + 5 stars
-Row 4: 1 leading space + 7 stars
-Row 5: 0 leading spaces + 9 stars
-Row 6: 1 leading space + 7 stars
-Row 7: 2 leading spaces + 5 stars
-Row 8: 3 leading spaces + 3 stars
-Row 9: 4 leading spaces + 1 star`}
-                  </pre>
-                </div>
-
-                <div className="p-2.5 rounded bg-neutral-950/40 border border-neutral-800/80 space-y-1 text-xs text-neutral-400">
-                  <div className="font-semibold text-neutral-300 font-mono text-[11px] uppercase tracking-wider">
-                    Input Instructions:
-                  </div>
-                  <ul className="list-disc list-inside space-y-0.5 text-xs text-neutral-400">
-                    <li>You may read N from standard input (where N = 5 for this pattern), OR use loops to generate the 5-row diamond directly.</li>
-                    <li>Both methods are fully accepted!</li>
-                    <li>Standard test input supplies: <code className="font-mono text-emerald-400 bg-neutral-800 px-1 py-0.5 rounded">5</code></li>
-                  </ul>
                 </div>
               </div>
+            ) : compState.activeRoundId === 'round2' ? (
+              <p className="text-xs text-neutral-300 whitespace-pre-line leading-relaxed bg-neutral-900/60 p-3.5 rounded-lg border border-neutral-800">
+                Debug the given C program and fix the errors.
+              </p>
             ) : (
               <p className="text-xs text-neutral-300 whitespace-pre-line leading-relaxed bg-neutral-900/60 p-3.5 rounded-lg border border-neutral-800">
                 {activeRound.description}
@@ -1137,7 +1125,7 @@ Row 9: 4 leading spaces + 1 star`}
             )}
           </div>
 
-          {activeRound.constraints && activeRound.constraints.length > 0 && (
+          {compState.activeRoundId !== 'round2' && compState.activeRoundId !== 'round3' && activeRound.constraints && activeRound.constraints.length > 0 && (
             <div className="space-y-2">
               <h3 className="text-xs font-semibold text-neutral-300 uppercase tracking-wider">
                 Constraints
@@ -1150,7 +1138,7 @@ Row 9: 4 leading spaces + 1 star`}
             </div>
           )}
 
-          {Boolean(activeRound.sampleInput || activeRound.sampleOutput) && (
+          {compState.activeRoundId !== 'round2' && compState.activeRoundId !== 'round3' && Boolean(activeRound.sampleInput || activeRound.sampleOutput) && (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {activeRound.sampleInput && (
                 <div className="space-y-1.5">
@@ -1175,7 +1163,7 @@ Row 9: 4 leading spaces + 1 star`}
             </div>
           )}
 
-          {activeRound.explanation && (
+          {compState.activeRoundId !== 'round2' && compState.activeRoundId !== 'round3' && activeRound.explanation && (
             <div className="p-3 rounded-lg bg-neutral-900/40 border border-neutral-800 text-xs text-neutral-400">
               <span className="font-semibold text-neutral-300">Explanation: </span>
               {activeRound.explanation}
