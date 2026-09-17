@@ -134,7 +134,8 @@ export function processExpiredTimersOnLoad(state: CompetitionState): Competition
           code,
           submittedAt: endIso,
           submissionType: 'AUTO_TIME_UP',
-          score: 0,
+          score: null,
+          evaluationStatus: 'NOT_EVALUATED',
           timeLimitSeconds: durationSecs,
           startedAt: timer.startDatetime,
           completedAt: endIso,
@@ -146,7 +147,7 @@ export function processExpiredTimersOnLoad(state: CompetitionState): Competition
           submissionDatetime: endIso,
           durationSeconds: durationSecs,
           attempts: (state.attempts[roundId] || 0) + 1,
-          testResultsSummary: 'Timer expired (00:00 reached) — submission automatically recorded.'
+          testResultsSummary: 'Your code was submitted automatically because the time limit expired. It has been saved for evaluation.'
         };
 
         newSubmissions.unshift(autoRecord);
@@ -292,7 +293,7 @@ export function exportResultsAsCSV(submissions: SubmissionRecord[], team: TeamId
     `"${s.activityId || s.activityTitle || ''}"`,
     `"${s.submissionType || 'MANUAL'}"`,
     `"${s.status}"`,
-    s.score,
+    s.score !== null && s.score !== undefined ? s.score : 'Pending Evaluation',
     s.timeLimitSeconds || 0,
     s.durationSeconds || 0,
     s.attempts || 1,

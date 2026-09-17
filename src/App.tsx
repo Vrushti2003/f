@@ -55,6 +55,7 @@ export default function App() {
   const [lastExecutionTime, setLastExecutionTime] = useState<number | null>(null);
   const [submitFeedback, setSubmitFeedback] = useState<{
     success: boolean;
+    isAuto?: boolean;
     message: string;
     details?: string;
   } | null>(null);
@@ -126,8 +127,8 @@ export default function App() {
     return Math.max(0, Math.ceil(diffMs / 1000));
   }, [timerState, activeRound, currentTimeMs, compState.activeRoundId, compState.powerCardEffects?.timeAdjustSeconds]);
 
-  // Automatic submission when timer reaches 00:00
-  const handleAutoSubmit = useCallback(async (roundId: RoundId) => {
+  // Automatic submission when timer reaches 00:00 (SIMPLE SUBMISSION ONLY — NO EVALUATION, NO SCORING)
+  const handleAutoSubmit = useCallback((roundId: RoundId) => {
     // 1. Guard against duplicate or concurrent submissions
     if (isSubmittingRef.current || submittedRoundsRef.current.has(roundId)) {
       return;
@@ -136,46 +137,27 @@ export default function App() {
     submittedRoundsRef.current.add(roundId);
 
     const currentState = compStateRef.current;
+    // Guard: once status = "SUBMITTED", never automatically submit again
+    if (
+      currentState.timers[roundId]?.submitted ||
+      currentState.submissions.some((s) => s.roundId === roundId)
+    ) {
+      isSubmittingRef.current = false;
+      return;
+    }
+
     const roundSpec = ROUND_SPECS[roundId];
-    const code = currentState.editorCode[roundId] || roundSpec.starterCode;
+    // Exact code currently present in the editor at the moment timer reaches 00:00 (preserve exactly without modifying or resetting)
+    const code = currentState.editorCode[roundId] !== undefined
+      ? currentState.editorCode[roundId]
+      : roundSpec.starterCode;
     const teamName = currentState.selectedTeam || 'Unassigned';
     const now = new Date();
     const nowIso = now.toISOString();
     const startIso = currentState.timers[roundId]?.startDatetime || nowIso;
     const durationSecs = roundSpec.durationMinutes * 60;
 
-    let earnedScore = 0;
-    let testSummary = 'Timer expired (00:00 reached) — submission automatically recorded.';
-
-    try {
-      let passedCount = 0;
-      const totalTests = roundSpec.testCases.length;
-      if (totalTests === 0) {
-        const res = await runCCode(code, roundSpec.sampleInput || '', 2000);
-        if (!res.error) passedCount = 1;
-      } else {
-        for (const tc of roundSpec.testCases) {
-          const res = await runCCode(code, tc.input, 2000);
-          if (!res.error && (res.output || '').trim() === tc.expectedOutput.trim()) {
-            passedCount++;
-          } else {
-            break;
-          }
-        }
-      }
-
-      const isAllPassed = totalTests === 0 ? passedCount === 1 : passedCount === totalTests;
-      if (isAllPassed) {
-        earnedScore = roundId === 'round2' ? 70 : roundSpec.maxPoints;
-        testSummary = `Time expired: All tests passed! +${earnedScore} points awarded.`;
-      } else {
-        earnedScore = 0;
-        testSummary = `Time expired: Passed ${passedCount}/${totalTests || 1} tests.`;
-      }
-    } catch {
-      earnedScore = 0;
-    }
-
+    // AUTO_TIME_UP: Save only. NO compiler, NO evaluation, NO test execution, NO automatic score.
     const autoSubmission: SubmissionRecord = {
       id: `sub_${roundId}_${Date.now()}`,
       teamId: teamName,
@@ -186,7 +168,8 @@ export default function App() {
       code,
       submittedAt: nowIso,
       submissionType: 'AUTO_TIME_UP',
-      score: earnedScore,
+      score: null,
+      evaluationStatus: 'NOT_EVALUATED',
       timeLimitSeconds: durationSecs,
       startedAt: startIso,
       completedAt: nowIso,
@@ -198,7 +181,7 @@ export default function App() {
       submissionDatetime: nowIso,
       durationSeconds: durationSecs,
       attempts: (currentState.attempts[roundId] || 0) + 1,
-      testResultsSummary: testSummary
+      testResultsSummary: 'Your code was submitted automatically because the time limit expired. It has been saved for evaluation.'
     };
 
     setCompState((prev) => {
@@ -218,7 +201,7 @@ export default function App() {
       };
       const updated: CompetitionState = {
         ...prev,
-        activeSectionId: null,
+        activeSectionId: null, // Release the global section timer lock so another section can be started
         timers: nextTimers,
         submissions: [autoSubmission, ...prev.submissions]
       };
@@ -228,8 +211,9 @@ export default function App() {
 
     setSubmitFeedback({
       success: false,
+      isAuto: true,
       message: 'Time expired — submission automatically recorded.',
-      details: testSummary
+      details: 'Your code was submitted automatically because the time limit expired. It has been saved for evaluation.'
     });
 
     isSubmittingRef.current = false;
@@ -517,6 +501,7 @@ export default function App() {
         submittedAt: nowIso,
         submissionType: 'MANUAL',
         score: earnedScore,
+        evaluationStatus: 'EVALUATED',
         timeLimitSeconds: timeLimitSecs,
         startedAt: startIso,
         completedAt: nowIso,
@@ -928,8 +913,18 @@ export default function App() {
               )
             ) : timerState.submitted ? (
               <div className="flex items-center gap-2">
-                <div className="px-3.5 py-1.5 rounded-md bg-emerald-950 border border-emerald-800 text-emerald-300 text-xs font-semibold flex items-center gap-1.5">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                <div
+                  className={`px-3.5 py-1.5 rounded-md border text-xs font-semibold flex items-center gap-1.5 ${
+                    compState.timers[compState.activeRoundId]?.submissionType === 'AUTO_TIME_UP'
+                      ? 'bg-amber-950/80 border-amber-800 text-amber-300'
+                      : 'bg-emerald-950 border-emerald-800 text-emerald-300'
+                  }`}
+                >
+                  {compState.timers[compState.activeRoundId]?.submissionType === 'AUTO_TIME_UP' ? (
+                    <Clock className="w-4 h-4 text-amber-400" />
+                  ) : (
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                  )}
                   {compState.timers[compState.activeRoundId]?.submissionType === 'AUTO_TIME_UP'
                     ? 'Time expired — submission automatically recorded.'
                     : 'Submitted ✓'}
@@ -1171,13 +1166,17 @@ Row 9: 4 leading spaces + 1 star`}
             <div
               id="submission-feedback-alert"
               className={`p-3.5 rounded-lg border text-xs font-mono ${
-                submitFeedback.success
+                submitFeedback.isAuto
+                  ? 'bg-amber-950/70 border-amber-800 text-amber-300'
+                  : submitFeedback.success
                   ? 'bg-emerald-950/60 border-emerald-800 text-emerald-300'
                   : 'bg-rose-950/60 border-rose-800 text-rose-300'
               }`}
             >
               <div className="font-semibold flex items-center gap-1.5">
-                {submitFeedback.success ? (
+                {submitFeedback.isAuto ? (
+                  <Clock className="w-4 h-4 text-amber-400" />
+                ) : submitFeedback.success ? (
                   <CheckCircle2 className="w-4 h-4 text-emerald-400" />
                 ) : (
                   <AlertTriangle className="w-4 h-4 text-rose-400" />

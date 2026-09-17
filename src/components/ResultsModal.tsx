@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { SubmissionRecord, TeamId } from '../types';
 import { exportResultsAsCSV, exportResultsAsJSON } from '../storage';
-import { Trophy, FileSpreadsheet, FileJson, CheckCircle2, XCircle, Code, ChevronDown, ChevronUp } from 'lucide-react';
+import { Trophy, FileSpreadsheet, FileJson, CheckCircle2, XCircle, Code, ChevronDown, ChevronUp, Clock } from 'lucide-react';
 
 interface ResultsModalProps {
   isOpen: boolean;
@@ -22,7 +22,7 @@ export const ResultsModal: React.FC<ResultsModalProps> = ({
 
   if (!isOpen) return null;
 
-  const totalScore = submissions.reduce((acc, s) => acc + s.score, 0);
+  const totalScore = submissions.reduce((acc, s) => acc + (s.score ?? 0), 0);
 
   return (
     <div
@@ -159,22 +159,34 @@ export const ResultsModal: React.FC<ResultsModalProps> = ({
                             <td className="py-2.5 px-3">
                               <span
                                 className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold ${
-                                  s.status === 'COMPLETED' || (s.status === 'SUBMITTED' && s.score > 0)
+                                  s.score !== null && s.score > 0
                                     ? 'bg-emerald-950 text-emerald-400 border border-emerald-800'
-                                    : s.status === 'TIME_OVER' || isAuto
+                                    : isAuto || s.score === null
                                     ? 'bg-amber-950 text-amber-400 border border-amber-800'
                                     : 'bg-neutral-800 text-neutral-300 border border-neutral-700'
                                 }`}
                               >
-                                {s.score > 0 ? (
+                                {s.score !== null && s.score > 0 ? (
                                   <CheckCircle2 className="w-3 h-3" />
+                                ) : isAuto || s.score === null ? (
+                                  <Clock className="w-3 h-3" />
                                 ) : (
                                   <XCircle className="w-3 h-3" />
                                 )}
-                                {s.status}
+                                {s.score === null ? 'SUBMITTED' : s.status}
                               </span>
                             </td>
-                            <td className="py-2.5 px-3 font-bold text-emerald-400">+{s.score}</td>
+                            <td className="py-2.5 px-3 font-bold">
+                              {s.score !== null ? (
+                                <span className={s.score > 0 ? 'text-emerald-400' : 'text-neutral-400'}>
+                                  +{s.score}
+                                </span>
+                              ) : (
+                                <span className="text-amber-400 text-[11px] font-mono italic">
+                                  Pending Evaluation
+                                </span>
+                              )}
+                            </td>
                             <td className="py-2.5 px-3 text-neutral-400">
                               {Math.floor((s.durationSeconds || 0) / 60)}m {(s.durationSeconds || 0) % 60}s
                             </td>

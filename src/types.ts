@@ -62,7 +62,8 @@ export interface SubmissionRecord {
   code: string;
   submittedAt: string; // ISO string
   submissionType: SubmissionType;
-  score: number;
+  score: number | null;
+  evaluationStatus?: 'NOT_EVALUATED' | 'EVALUATED';
   timeLimitSeconds: number;
   startedAt: string;   // ISO string
   completedAt: string; // ISO string
